@@ -1,5 +1,6 @@
 "use client";
 import { parseContractText } from "@/lib/audit/contract-parser";
+import { buildNegotiationPlaybook } from "@/lib/negotiation-intel";
 import { SelectMenu } from "@/components/ui/select-menu";
 import Link from "next/link";
 import { useMemo, useState } from "react";
@@ -100,6 +101,25 @@ export function VendorDetail({ id }: { id: string }) {
               ))}</ul>
             )}
           </Card>
+
+          {(() => {
+            const pb = buildNegotiationPlaybook(vendor, s.invoices, new Date().toISOString().slice(0, 10));
+            if (!pb) return null;
+            return (
+              <Card>
+                <SectionHeader title="Forensic & negotiation profile" description={`Leverage: ${pb.leverageScore} · Forensic variance: ${pb.forensicLabel} (${pb.volatilityPct}%)`} />
+                <div className="space-y-3 px-5 py-4 text-sm">
+                  <div className="grid grid-cols-2 gap-2 rounded-xl bg-canvas p-3 text-xs">
+                    <div><span className="text-muted-foreground">Est. annual spend</span><p className="num mt-0.5 font-semibold">{pb.annualizedSpend}</p></div>
+                    <div><span className="text-muted-foreground">Settled bills</span><p className="num mt-0.5 font-semibold">{pb.onTimeRatePct}%</p></div>
+                  </div>
+                  <ul className="list-disc space-y-1.5 pl-4 text-xs text-muted-foreground">
+                    {pb.talkingPoints.map((pt, idx) => <li key={idx}>{pt}</li>)}
+                  </ul>
+                </div>
+              </Card>
+            );
+          })()}
 
           <Disclosure title="What you expect to pay">
             <div className="space-y-3 px-5 py-4">
