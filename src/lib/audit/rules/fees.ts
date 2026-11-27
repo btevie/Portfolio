@@ -22,6 +22,14 @@ export const unexpectedFeeRule: Rule = (inv, ctx) => {
     // 1. Check known Dutch/EU/SaaS billing traps (works even on the first invoice!)
     const traps = detectBillingTraps(line.description);
     for (const trap of traps) {
+      const uncertainty =
+          trap.code === "ERR_PREMATURE_COLLECTION"
+            ? "This charge may be valid if you already received a compliant 14-day written reminder (14-dagenbrief) and missed the payment deadline."
+            : trap.code === "ERR_WEEE_DISPOSAL_FEE"
+              ? "This charge may be valid if it covers specialized commercial installation or transport beyond statutory 1-for-1 WEEE take-back."
+              : trap.code === "ERR_HEALTHCARE_TARIFF_UNBUNDLED"
+                ? "This charge may be valid if a distinct, separately billable NZa procedure code was performed and documented."
+                : "This charge may be valid if you explicitly opted into the add-on or agreed to it in your contract.";
       out.push(makeFinding(inv, {
         ruleId: "unexpected_fee",
         key: `trap-${trap.code}-${line.id}`,
@@ -38,7 +46,7 @@ export const unexpectedFeeRule: Rule = (inv, ctx) => {
         ],
         confidence: trap.confidence,
         confidenceReason: `Matched common billing-trap pattern (${trap.category}) on the line description.`,
-        uncertainty: "This charge may be valid if you explicitly opted into the add-on or agreed to it in your contract.",
+        uncertainty,
         recommendedAction: trap.action,
         amountAtRisk: withTax(D(line.total), taxFactor(inv, line.taxRate)),
       }));

@@ -58,7 +58,8 @@ function finalize(p: {
 }): ExtractedInvoice {
   const items = p.lines.filter((l) => l.kind === "item");
   const feeLines = p.lines.filter((l) => l.kind === "fee");
-  const currency = toCurrency(p.currency);
+  const inferredEu = !p.currency?.trim() && /\b(b\.v\.|n\.v\.|btw|kvk|incassokosten|factuur|zakelijk|toestelverzekering|papieren|verlegd|nl\d{2}[a-z]{4})\b/i.test([p.vendorName ?? "", ...p.lines.map((l) => l.description)].join(" "));
+  const currency = toCurrency(p.currency) ?? (inferredEu ? "EUR" : undefined);
   if (p.currency?.trim() && !currency) throw new Error(`Currency "${cleanText(p.currency, 16)}" isn't recognized. Enter a supported ISO code or symbol, such as EUR or €.`);
   const vendorName = p.vendorName ? cleanText(p.vendorName, MAX_VENDOR_CHARS) || undefined : undefined;
   const number = p.number ? cleanText(p.number, MAX_NUMBER_CHARS) || undefined : undefined;

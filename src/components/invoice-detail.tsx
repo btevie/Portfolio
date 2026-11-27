@@ -18,6 +18,7 @@ import { extractionInfo, findingGuide, isSimulated, uncertainFieldLabels } from 
 import { ruleCoverage } from "@/lib/coverage";
 import type { AuditFinding, FindingDecision, Invoice } from "@/lib/types";
 import { DisputeKitEditor } from "@/components/dispute-kit";
+import { buildDisputeKit } from "@/lib/dispute-kit";
 import { CreditTracker, LinkedCredits } from "@/components/credit-tracker";
 import { Button, Card, ClassBadge, Disclosure, EmptyState, LinkButton, Modal, MotionBlock, PageHeader, Reveal, Pill, SectionHeader, SeverityPill } from "@/components/ui";
 
@@ -249,7 +250,26 @@ function FindingCard({ f, inv, onNote, first, simulated }: { f: AuditFinding; in
           <div><h4 className="eyebrow">Why we flagged this</h4><ul className="mt-1.5 list-disc space-y-1 pl-5">{f.evidence.map((e, i) => <li key={i}>{e}</li>)}</ul></div>
           <div><h4 className="eyebrow">How sure are we? (confidence)</h4><p className="mt-1.5">{f.confidenceReason}</p></div>
           <div><h4 className="eyebrow">What we can&apos;t be sure about</h4><p className="mt-1.5">{f.uncertainty}</p></div>
-          <div><h4 className="eyebrow">What to do next</h4><p className="mt-1.5">{f.recommendedAction}</p></div>
+          <div>
+            <h4 className="eyebrow">What to do next</h4>
+            <p className="mt-1.5">{f.recommendedAction}</p>
+            <div className="mt-2.5 flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  const kit = buildDisputeKit(inv, f, decision, "");
+                  const draft = `Subject: ${kit.subject}\n\n${kit.message}`;
+                  void navigator.clipboard?.writeText(draft);
+                  setUndo({ from: decision, label: "Dispute email copied to clipboard" });
+                }}
+              >
+                <MailPlus className="mr-1.5 size-3.5" aria-hidden />
+                Copy dispute email
+              </Button>
+            </div>
+          </div>
           {D(f.amountAtRisk).gt(0) && <p className="num text-muted-foreground">Amount at stake (incl. tax): <strong className="text-ink">{formatMoney(f.amountAtRisk, inv.currency)}</strong></p>}
           <p role="status" className="min-h-5 text-sm text-muted-foreground">{undo && <>{undo.label}. <button type="button" className="min-h-11 cursor-pointer font-semibold text-primary hover:underline" onClick={() => { actions.setDecision(f.id, undo.from); setUndo(null); }}>Undo</button></>}</p>
           {simulated ? <p className="border-t border-line pt-4 text-sm text-muted-foreground">Decisions, notes and tracking are switched off for simulated results, because they would describe a bill that does not exist.</p> : (
