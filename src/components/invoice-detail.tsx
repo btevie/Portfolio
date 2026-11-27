@@ -1,4 +1,5 @@
 "use client";
+import { AiSecondOpinionCard } from "@/components/ai-second-opinion";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
@@ -150,6 +151,7 @@ export function InvoiceDetail({ id }: { id: string }) {
           )}
         </Card>
       </div>
+      <AiSecondOpinionCard invoice={inv} />
       {lineCmp && (
         <Card className="mt-6">
           <SectionHeader title={`Line by line vs ${lineCmp.previous.number}`} description={`Previous invoice from ${lineCmp.previous.vendorName}, ${fmtDate(lineCmp.previous.date)}. Lines are paired only when the descriptions match exactly; a price change is something to ask about, not a confirmed error.`} />
