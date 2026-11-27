@@ -58,6 +58,9 @@ export interface DisputeKit {
 }
 
 function trapSpecificGuidance(f: AuditFinding): string | null {
+  if (f.id.includes("reverse-charge")) {
+    return "As a VAT-registered EU business (B2B), cross-border supplies should be billed at 0% VAT under the EU reverse-charge mechanism (BTW verlegd) with our VAT ID listed on the invoice.";
+  }
   if (f.id.includes("nl-vat9")) {
     return "Under Dutch VAT rules (Tabel I Wet OB), food, non-alcoholic catering, books, and passenger transport generally qualify for the reduced 9% BTW rate rather than 21%.";
   }

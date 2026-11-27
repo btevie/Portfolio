@@ -11,6 +11,8 @@ const REDUCED_VAT_9_PATTERNS = [
   /\b(kapper|kappersbehandeling|fietsenmaker|fietsreparatie|schoenmaker|schoenreparatie)\b/i,
 ];
 
+const EU_CROSS_BORDER_VENDORS = /\b(aws emea|amazon web services|microsoft ireland|google ireland|google cloud|stripe|shopify|adobe|slack|atlassian|hubspot|figma|notion|vercel|webflow|openai|anthropic|meta ireland|linkedin ireland|zoom|dropbox|github|digitalocean|cloudflare|mailchimp|intercom|zendesk|salesforce|pipedrive|miro)\b/i;
+const REVERSE_CHARGE_WORDS = /\b(btw verlegd|reverse charge|reverse-charge|intracommunautair|intra-community)\b/i;
 const ALCOHOL_OR_EXCLUSION = /\b(alcohol|wijn|bier|sterke drank|wine|beer|spirits|borrel)\b/i;
 
 export const taxRule: Rule = (inv, ctx) => {
@@ -88,6 +90,46 @@ export const taxRule: Rule = (inv, ctx) => {
       uncertainty: "21% VAT may still apply if the line includes alcoholic beverages, non-food merchandise, or full-service event hosting.",
       recommendedAction: "Check whether the items qualify for the 9% reduced BTW rate and ask the supplier for a corrected invoice if 21% was charged in error.",
       amountAtRisk: str2(overcharge),
+    }));
+  }
+
+  // EU B2B reverse-charge (BTW verlegd) check
+  const hasReverseChargeLabel = inv.lineItems.some((l) => REVERSE_CHARGE_WORDS.test(l.description));
+  if (hasReverseChargeLabel && D(inv.taxAmount).gt(tol)) {
+    out.push(makeFinding(inv, {
+      ruleId: "tax",
+      key: "reverse-charge-taxed",
+      classification: "LIKELY_ERROR",
+      severity: D(inv.taxAmount).gte(20) ? "high" : "medium",
+      title: "Tax charged on an invoice marked reverse-charge (BTW verlegd)",
+      explanation: `An invoice line references reverse-charge (BTW verlegd), yet ${m(inv.taxAmount)} in tax was charged.`,
+      expected: m("0"),
+      actual: m(inv.taxAmount),
+      difference: formatMoney(inv.taxAmount, inv.currency, { signed: true }),
+      evidence: [`Stated tax amount: ${m(inv.taxAmount)}`, "Line description indicates reverse-charge / BTW verlegd"],
+      confidence: "high",
+      confidenceReason: "Reverse-charge (BTW verlegd) supplies must be billed at 0% VAT.",
+      uncertainty: "Verify that only part of the invoice was reverse-charged while other lines were locally taxable.",
+      recommendedAction: "Ask the supplier to credit the charged VAT and reissue the invoice at 0% BTW verlegd.",
+      amountAtRisk: str2(D(inv.taxAmount)),
+    }));
+  } else if (inv.currency === "EUR" && D(inv.taxAmount).gt(tol) && EU_CROSS_BORDER_VENDORS.test(inv.vendorName)) {
+    out.push(makeFinding(inv, {
+      ruleId: "tax",
+      key: "eu-b2b-reverse-charge",
+      classification: "REVIEW_NEEDED",
+      severity: D(inv.taxAmount).gte(25) ? "medium" : "low",
+      title: `VAT charged by cross-border supplier ${inv.vendorName} (check EU B2B BTW verlegd)`,
+      explanation: `${inv.vendorName} charged ${m(inv.taxAmount)} in VAT. For Dutch VAT-registered businesses (B2B), cross-border EU/international SaaS invoices should normally be billed at 0% reverse-charge (BTW verlegd)—VAT charged in error cannot be reclaimed on a Dutch BTW return.`,
+      expected: `0% BTW verlegd (${m("0")})`,
+      actual: m(inv.taxAmount),
+      difference: formatMoney(inv.taxAmount, inv.currency, { signed: true }),
+      evidence: [`Vendor: ${inv.vendorName}`, `VAT charged: ${m(inv.taxAmount)}`],
+      confidence: "medium",
+      confidenceReason: "This supplier commonly issues cross-border EU B2B invoices where reverse-charge applies once your VAT ID is on file.",
+      uncertainty: "If you are buying as an individual consumer (B2C) or VAT-exempt entity without a VAT ID on file, charging local VAT is required.",
+      recommendedAction: "If this is a B2B purchase, add your Dutch BTW-nummer to your vendor billing profile and request a credit note for the charged VAT.",
+      amountAtRisk: str2(D(inv.taxAmount)),
     }));
   }
 
