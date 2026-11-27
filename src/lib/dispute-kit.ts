@@ -58,6 +58,9 @@ export interface DisputeKit {
 }
 
 function trapSpecificGuidance(f: AuditFinding): string | null {
+  if (f.id.includes("cpi-excess")) {
+    return "Under Dutch and EU commercial practice, standard annual indexation clauses follow official CBS CPI / EU HICP inflation rates rather than discretionary surcharges above inflation.";
+  }
   if (f.id.includes("reverse-charge")) {
     return "As a VAT-registered EU business (B2B), cross-border supplies should be billed at 0% VAT under the EU reverse-charge mechanism (BTW verlegd) with our VAT ID listed on the invoice.";
   }
