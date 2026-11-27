@@ -1,8 +1,32 @@
-import type { AuditFinding } from "../../types";
+import type { AuditFinding, Invoice } from "../../types";
 import { priorInvoices } from "../history";
+import { D, formatMoney, str2 } from "../money";
 import { daysBetween, parseISO } from "../normalize";
 import type { Rule } from "../types";
-import { makeFinding } from "./util";
+import { makeFinding, taxFactor, withTax } from "./util";
+
+const ISO_RANGE_RX = /(\d{4}-\d{2}-\d{2})\s*(?:to|until|through|t\/m|-|–)\s*(\d{4}-\d{2}-\d{2})/i;
+const EU_RANGE_RX = /(\d{2})[-/](\d{2})[-/](\d{4})\s*(?:to|until|through|t\/m|-|–)\s*(\d{2})[-/](\d{2})[-/](\d{4})/i;
+
+function extractServicePeriod(inv: Invoice): { start: number; end: number; startStr: string; endStr: string } | null {
+  for (const line of inv.lineItems) {
+    const isoMatch = line.description.match(ISO_RANGE_RX);
+    if (isoMatch) {
+      const s = parseISO(isoMatch[1]);
+      const e = parseISO(isoMatch[2]);
+      if (s !== null && e !== null && e > s) return { start: s, end: e, startStr: isoMatch[1], endStr: isoMatch[2] };
+    }
+    const euMatch = line.description.match(EU_RANGE_RX);
+    if (euMatch) {
+      const isoStart = `${euMatch[3]}-${euMatch[2]}-${euMatch[1]}`;
+      const isoEnd = `${euMatch[6]}-${euMatch[5]}-${euMatch[4]}`;
+      const s = parseISO(isoStart);
+      const e = parseISO(isoEnd);
+      if (s !== null && e !== null && e > s) return { start: s, end: e, startStr: isoStart, endStr: isoEnd };
+    }
+  }
+  return null;
+}
 
 export const datesRule: Rule = (inv, ctx) => {
   const out: AuditFinding[] = [];
@@ -73,5 +97,38 @@ export const datesRule: Rule = (inv, ctx) => {
       }));
     }
   }
+
+  const currentPeriod = extractServicePeriod(inv);
+  const last = prior[prior.length - 1];
+  const prevPeriod = last ? extractServicePeriod(last) : null;
+  if (currentPeriod && prevPeriod && currentPeriod.start <= prevPeriod.end) {
+    const overlapDays = daysBetween(currentPeriod.start, prevPeriod.end) + 1;
+    const totalDays = Math.max(1, daysBetween(currentPeriod.start, currentPeriod.end) + 1);
+    const proRata = D(inv.subtotal).times(overlapDays).div(totalDays);
+    if (overlapDays >= 2 && proRata.gt(0)) {
+      out.push(makeFinding(inv, {
+        ruleId: "dates",
+        key: `period-overlap-${last.id}`,
+        classification: "REVIEW_NEEDED",
+        severity: overlapDays >= 7 ? "medium" : "low",
+        title: `Billing period overlaps by ${overlapDays} day${overlapDays === 1 ? "" : "s"} with invoice ${last.number}`,
+        explanation: `This invoice covers ${currentPeriod.startStr} to ${currentPeriod.endStr}, overlapping by ${overlapDays} day(s) with previous invoice ${last.number} (${prevPeriod.startStr} to ${prevPeriod.endStr}).`,
+        expected: `Start after ${prevPeriod.endStr}`,
+        actual: `${currentPeriod.startStr} to ${currentPeriod.endStr}`,
+        difference: `${overlapDays} overlapping day(s) (~${formatMoney(str2(proRata), inv.currency)})`,
+        evidence: [
+          `Previous invoice ${last.number} period: ${prevPeriod.startStr} to ${prevPeriod.endStr}`,
+          `Current invoice ${inv.number} period: ${currentPeriod.startStr} to ${currentPeriod.endStr}`,
+          `Estimated pro-rata overlap: ${overlapDays}/${totalDays} days = ${str2(proRata)}`,
+        ],
+        confidence: "high",
+        confidenceReason: "Both service date ranges are explicitly printed on the invoices and overlap.",
+        uncertainty: "An overlap can be valid if this invoice is a separate add-on subscription or if a credit note was issued for the earlier period.",
+        recommendedAction: "Ask the vendor to confirm whether the overlapping days were double-billed and request a pro-rata credit if so.",
+        amountAtRisk: withTax(proRata, taxFactor(inv, inv.taxRate)),
+      }));
+    }
+  }
+
   return out;
 };
