@@ -1,3 +1,4 @@
+import { forecastVendorSpend } from "./audit/forecasting";
 import { analyzeVendorForensics } from "./audit/forensics";
 import { D, formatMoney, str2 } from "./audit/money";
 import { daysBetween, parseISO } from "./audit/normalize";
@@ -38,6 +39,7 @@ export function buildNegotiationPlaybook(vendor: Vendor, invoices: Invoice[], to
       : 0;
 
   const forensics = analyzeVendorForensics(valid);
+  const forecast = forecastVendorSpend(valid);
 
   let daysToNoticeDeadline: number | null = null;
   const todayMs = parseISO(todayIso);
@@ -60,6 +62,9 @@ export function buildNegotiationPlaybook(vendor: Vendor, invoices: Invoice[], to
   }
   if (daysToNoticeDeadline !== null && daysToNoticeDeadline >= 0 && daysToNoticeDeadline <= 45) {
     talkingPoints.push(`Your cancellation notice window closes in ${daysToNoticeDeadline} day(s)—initiate renewal negotiations now while you still have full leverage to switch.`);
+  }
+  if (forecast) {
+    talkingPoints.push(`OLS econometric forecast: next bill expected around ${formatMoney(forecast.projectedNext, currency)} (95% CI: ${formatMoney(forecast.ci95Low, currency)}–${formatMoney(forecast.ci95High, currency)}), projecting ${formatMoney(forecast.projectedAnnualBurn, currency)} over the next 12 bills.`);
   }
   if (forensics.anomalyLabel !== "Consistent") {
     talkingPoints.push(`Billing variance is elevated (${forensics.volatilityPct}% volatility)—request an itemized rate card or fixed monthly cap.`);
