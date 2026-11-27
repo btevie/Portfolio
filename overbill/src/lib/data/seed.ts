@@ -118,7 +118,7 @@ for (let i = 0; i < 4; i++) {
   }));
 }
 
-const rec = (r: Omit<RecoveryRecord, "currency">): RecoveryRecord => ({ ...r, currency: "EUR" });
+const rec = (r: Omit<RecoveryRecord, "currency">): RecoveryRecord => ({ ...r, currency: "EUR", source: "demo" });
 
 export const recovery: RecoveryRecord[] = [
   rec({ id: "rec-1", vendorId: "v-orbit", vendorName: "Orbit Workspace", invoiceId: "inv-orbit-resend", findingId: "inv-orbit-resend:duplicate_invoice:exact-inv-orbit-6", title: "Duplicate November invoice OW-2211", amount: "338.80", status: "flagged", notes: "Same number and total re-sent on 3 Nov. Hold payment of the second copy.", createdAt: "2026-11-24", updatedAt: "2026-11-24" }),
@@ -141,7 +141,10 @@ export function createSeedState(): AppState {
     decisions: {},
     settings: {
       currency: "EUR", sensitivity: "balanced",
-      notifications: { weeklyDigest: true, highSeverityAlerts: true, priceChangeAlerts: true },
+      thresholds: { info: 5, review: 10, high: 20 }, tolerance: "0.01", exceptions: [],
+      defaults: { dateFormat: "iso", timezone: "UTC", paymentTermsDays: 30 },
+      reminders: { overdueReview: true, upcomingDue: true, vendorReply: true, reviewAfterDays: 7, dueWithinDays: 7, replyAfterDays: 14, browser: false },
+      setup: { defaultsConfirmed: false, dismissed: false },
       privacy: { keepUploadedFiles: false, analytics: false },
       disabledRules: [],
     },

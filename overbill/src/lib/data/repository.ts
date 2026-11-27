@@ -1,13 +1,16 @@
 import type { AppState } from "../types";
 import { createSeedState } from "./seed";
+import { parseStoredState } from "./validate-state";
 
 /**
  * Persistence boundary. The UI only talks to the store, and the store only talks to a Repository.
  * Swap `localRepository` for an API/DB-backed implementation without touching any component.
  */
 export interface Repository {
-  load(): AppState | null;
-  save(state: AppState): void;
+  /** Returns validated state plus how many invalid stored records were skipped, or null if nothing usable is stored. */
+  load(): { state: AppState; dropped: number } | null;
+  /** Returns false when the state could not be persisted (storage full or blocked). */
+  save(state: AppState): boolean;
   clear(): void;
 }
 
@@ -18,8 +21,7 @@ export const localRepository: Repository = {
     try {
       const raw = window.localStorage.getItem(KEY);
       if (!raw) return null;
-      const parsed = JSON.parse(raw) as AppState;
-      return parsed?.version === 1 ? parsed : null;
+      return parseStoredState(raw);
     } catch {
       return null;
     }
@@ -27,8 +29,9 @@ export const localRepository: Repository = {
   save(state) {
     try {
       window.localStorage.setItem(KEY, JSON.stringify(state));
+      return true;
     } catch {
-      /* storage full or unavailable: keep working in memory */
+      return false; // storage full or blocked: the store surfaces this to the user
     }
   },
   clear() {

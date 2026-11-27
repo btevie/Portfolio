@@ -37,7 +37,7 @@ export const datesRule: Rule = (inv, ctx) => {
     }));
   }
 
-  if (today !== null && d > today + 86_400_000) {
+  if (today !== null && d > today) {
     out.push(makeFinding(inv, {
       ruleId: "dates", key: "future",
       classification: "REVIEW_NEEDED", severity: "low",
@@ -65,7 +65,7 @@ export const datesRule: Rule = (inv, ctx) => {
         title: "Payment terms changed",
         explanation: `Previous invoices gave ${typical} days to pay; this one gives ${terms}.`,
         expected: `${typical} days`, actual: `${terms} days`, difference: `${terms - typical > 0 ? "+" : ""}${terms - typical} days`,
-        evidence: [`Typical terms across ${priorTerms.length} earlier invoices: ${typical} days`, `This invoice: ${inv.date} → ${inv.dueDate}`],
+        evidence: [`Typical terms across ${priorTerms.length} earlier invoices: ${typical} days`, `This invoice: ${inv.date} to ${inv.dueDate}`],
         confidence: priorTerms.length >= 3 ? "high" : "medium",
         confidenceReason: `The terms were consistent across ${priorTerms.length} earlier invoices, so the change is real; whether it's agreed is unknown.`,
         uncertainty: "The vendor may have updated their terms and notified you separately.",

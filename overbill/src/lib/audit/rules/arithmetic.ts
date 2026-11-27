@@ -2,7 +2,7 @@ import type { AuditFinding } from "../../types";
 import type { Invoice } from "../../types";
 import { D, Decimal, formatMoney, round2, str2, sum } from "../money";
 import type { Rule } from "../types";
-import { makeFinding, taxFactor, withTax } from "./util";
+import { makeFinding, taxFactor, weightedTaxFactor, withTax } from "./util";
 
 const m = (v: Decimal.Value, inv: Invoice) => formatMoney(v, inv.currency);
 
@@ -51,7 +51,7 @@ export const arithmeticRule: Rule = (inv, ctx) => {
       confidenceReason: "Re-adding the printed line totals is exact arithmetic.",
       uncertainty: "A line may be missing from the extracted data, or the subtotal may include items printed elsewhere on the document.",
       recommendedAction: "Check the original document for a missing line, then ask the vendor to explain the difference.",
-      amountAtRisk: subDiff.gt(0) ? withTax(subDiff, taxFactor(inv)) : "0.00",
+      amountAtRisk: subDiff.gt(0) ? withTax(subDiff, weightedTaxFactor(inv.lineItems.filter((l) => l.kind === "item"), inv.taxRate)) : "0.00",
     }));
   }
   const feeSum = sum(inv.lineItems.filter((l) => l.kind === "fee").map((l) => D(l.total)));
@@ -67,7 +67,7 @@ export const arithmeticRule: Rule = (inv, ctx) => {
       confidence: "high", confidenceReason: "Re-adding printed fee lines is exact arithmetic.",
       uncertainty: "Some fees may be printed outside the itemised lines.",
       recommendedAction: "Ask the vendor to itemise all fees.",
-      amountAtRisk: feeDiff.gt(0) ? withTax(feeDiff, taxFactor(inv)) : "0.00",
+      amountAtRisk: feeDiff.gt(0) ? withTax(feeDiff, weightedTaxFactor(inv.lineItems.filter((l) => l.kind === "fee"), inv.taxRate)) : "0.00",
     }));
   }
 

@@ -14,11 +14,16 @@ export const taxRule: Rule = (inv, ctx) => {
   const gross = sum(lines.map((l) => D(l.total)));
   const discount = D(inv.discounts);
   const groups = new Map<string, ReturnType<typeof D>>();
-  for (const l of rated) groups.set(l.rate!, (groups.get(l.rate!) ?? D(0)).plus(D(l.total)));
+  for (const l of rated) {
+    const rate = D(l.rate!).toString();
+    groups.set(rate, (groups.get(rate) ?? D(0)).plus(D(l.total)));
+  }
 
   let expected = D(0);
   const parts: string[] = [];
   for (const [rate, base] of groups) {
+    // Allocate invoice-wide discounts proportionally across every line, including
+    // lines without a stated rate; their share reduces their own tax base (zero).
     const share = gross.isZero() ? D(0) : discount.times(base).div(gross);
     const taxable = base.minus(share);
     const tax = taxable.times(D(rate)).div(100);
@@ -47,8 +52,12 @@ export const taxRule: Rule = (inv, ctx) => {
   // rate drift versus this vendor's earlier invoices
   const prior = priorInvoices(inv, ctx);
   const last = prior[prior.length - 1];
-  const lastRate = last?.taxRate ?? last?.lineItems.find((l) => l.taxRate)?.taxRate;
-  const thisRate = inv.taxRate ?? rated[0].rate;
+  const previousRates = last ? [...new Set((last.lineItems.length ? last.lineItems.map((l) => l.taxRate ?? last.taxRate) : [last.taxRate]).filter((r): r is string => r !== undefined).map((r) => D(r).toString()))] : [];
+  const currentRates = [...groups.keys()];
+  // A single representative rate is meaningful only when both invoices use one
+  // rate. Mixed-rate bills need a fuller jurisdiction-aware comparison.
+  const lastRate = previousRates.length === 1 ? previousRates[0] : undefined;
+  const thisRate = currentRates.length === 1 ? currentRates[0] : undefined;
   if (lastRate && thisRate && !D(lastRate).eq(D(thisRate))) {
     out.push(makeFinding(inv, {
       ruleId: "tax", key: "rate-change",

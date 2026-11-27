@@ -12,7 +12,19 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Tool output / scratch directories, not project source.
+    "public/pdf.worker.min.mjs", // vendored, minified pdf.js worker
+    ".playwright-mcp/**",
+    ".21st/**",
+    ".claude/**",
+    "test-results/**",
+    "playwright-report/**",
   ]),
+  {
+    // Playwright fixtures expose a callback named `use`, which is not a React hook.
+    files: ["e2e/**/*.ts"],
+    rules: { "react-hooks/rules-of-hooks": "off" },
+  },
 ]);
 
 export default eslintConfig;
