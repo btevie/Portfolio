@@ -70,7 +70,7 @@ export function analyzeCsv(text: string): CsvAnalysis {
   const used = new Set<number>();
   for (const f of CSV_FIELDS) { const i = heads.indexOf(f.key); if (i >= 0 && !used.has(i)) { exact[f.key] = i; used.add(i); } else exact[f.key] = null; }
   const requiredOk = (m: CsvMap) => CSV_FIELDS.filter((f) => f.required).every((f) => m[f.key] !== null);
-  if (rows.length < 2 || (requiredOk(exact) && CSV_FIELDS.every((f) => exact[f.key] !== null || !heads.some((h, i) => !used.has(i) && f.aliases.includes(h) && f.key !== "invoice_total")))) {
+  if (rows.length < 2 || (requiredOk(exact) && CSV_FIELDS.every((f) => exact[f.key] !== null || !heads.some((h, i) => !used.has(i) && f.aliases.includes(h))))) {
     return { ...base, status: "ready", map: exact, basis: "exact" };
   }
   const saved = readSaved()[signature];

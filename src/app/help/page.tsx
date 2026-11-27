@@ -5,7 +5,7 @@ import { PageShell } from "@/components/site/page-shell";
 export const metadata: Metadata = { title: "Help" };
 
 const FAQ: [string, string][] = [
-  ["What files can I check?", "CSV files, pasted invoice text and PDFs with a selectable text layer are read in your browser (PDF layout is matched by pattern, so check the figures). Photos and scans use example data in this demo: the file name picks a sample, and the result says it is simulated. A PDF that cannot be opened at all also gets example data, marked simulated."],
+  ["What files can I check?", "CSV files, pasted invoice text and PDFs with selectable text are read in your browser (PDF layout is matched by pattern, so check the figures). Photos and scanned PDFs use on-device text recognition (OCR), which can misread figures; confirm the highlighted fields before the audit runs. If a PDF cannot be opened, Overbill may show a clearly labelled simulated example made from fictional data, not your bill."],
   ["Where does my data go?", "Nowhere. It is saved in this browser only. Files are never uploaded or kept."],
   ["What do “Likely error” and “Review needed” mean?", "Likely error means the evidence is strong, for example a duplicate or a sum that does not add up. Review needed means something looks unusual and is worth a look. Neither is confirmed until you decide."],
   ["A finding is wrong. What now?", "Open the invoice and choose “Dismiss, this is expected”. It stops counting toward the amounts at stake."],

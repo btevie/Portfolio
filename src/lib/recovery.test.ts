@@ -22,7 +22,7 @@ describe("recovery case timeline", () => {
     expect(r.events?.map((e) => e.kind)).toEqual(["disputed", "status"]);
   });
 
-  it("keeps promised, applied and received apart and only finishes when it all arrived", () => {
+  it("keeps partial promises open until the full claim is received", () => {
     let r = run(base({ status: "vendor_responded" }), { kind: "promise", amount: "80", date: "2026-12-01" });
     expect(r.status).toBe("credit_issued");
     expect(caseFigures(r).promised?.toFixed(2)).toBe("80.00");
@@ -32,8 +32,16 @@ describe("recovery case timeline", () => {
     expect([f.promised?.toFixed(2), f.applied.toFixed(2), f.received.toFixed(2), f.outstanding.toFixed(2)]).toEqual(["80.00", "30.00", "0.00", "50.00"]);
     r = run(r, { kind: "received", amount: "50", date: "2026-11-20", reference: "RF-9" });
     f = caseFigures(r);
-    expect(r.status).toBe("recovered");
+    expect(r.status).toBe("vendor_responded");
     expect([f.applied.toFixed(2), f.received.toFixed(2), f.outstanding.toFixed(2)]).toEqual(["30.00", "50.00", "0.00"]);
+    expect(caseFigures(r).claimed.minus(f.resolved).toFixed(2)).toBe("20.00");
+    expect(nextAction(r, "2026-11-20")?.label).toMatch(/20\.00 still claimed/);
+    r = run(r, { kind: "promise", amount: "100" }); // total promised now covers the original claim
+    expect(r.status).toBe("credit_issued");
+    r = run(r, { kind: "received", amount: "20", date: "2026-11-20", reference: "RF-10" });
+    f = caseFigures(r);
+    expect(r.status).toBe("recovered");
+    expect([f.applied.toFixed(2), f.received.toFixed(2), f.outstanding.toFixed(2)]).toEqual(["30.00", "70.00", "0.00"]);
   });
 
   it("refuses amounts that are invalid, negative, in the future, or above what was promised", () => {

@@ -5,7 +5,7 @@ import { PageShell, Section } from "@/components/site/page-shell";
 export const metadata: Metadata = { title: "How it works" };
 
 const STEPS = [
-  ["Add your bill", "Upload a CSV or paste the invoice text. Both are read in your browser. Text-based PDFs are read the same way; photos and scans use example data in this demo."],
+  ["Add your bill", "Upload a CSV or paste invoice text to read it in your browser. Text PDFs are parsed there too. Photos and scanned PDFs use on-device text recognition (OCR), then ask you to confirm the highlighted fields. A PDF the reader cannot open may show a clearly labelled simulated example instead."],
   ["Overbill checks it", "It runs eight checks against the invoice, that vendor's earlier invoices and the rates you entered."],
   ["You decide", "Confirm a finding, dismiss it, or draft a dispute note to send yourself."],
   ["Track the money", "Follow each case from flagged to recovered on the Recovery page."],

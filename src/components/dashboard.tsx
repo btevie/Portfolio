@@ -10,6 +10,7 @@ import { useBackupAge } from "@/lib/backup";
 import { ChartCard } from "@/components/charts/kpi-charts";
 import { SpendCard } from "@/components/spend-card";
 import { creditBalanceByCurrency, creditsToResolve, formatBalances } from "@/lib/credits";
+import { isSimulated } from "@/lib/evidence";
 import { Card, Disclosure, EmptyState, LinkButton, PageHeader } from "@/components/ui";
 
 
@@ -69,8 +70,8 @@ function NextActions({ actions }: { actions: NextAction[] }) {
         <h2 id="attn-h" className="text-sm font-semibold tracking-[-0.01em]">Start here: what to do next</h2>
         <span className="text-xs text-muted-foreground">{actions.length} to look at</span>
       </div>
-      <div className="grid gap-3 lg:grid-cols-[1.15fr_1fr]">
-        <article className="flex flex-col gap-3 self-start rounded-2xl bg-card p-4 ring-1 ring-line sm:gap-4 sm:p-6">
+      <div className="grid gap-3 lg:grid-cols-[1.15fr_1fr] lg:gap-0 lg:overflow-hidden lg:rounded-2xl lg:bg-card lg:ring-1 lg:ring-line">
+        <article className="flex flex-col gap-3 self-start rounded-2xl bg-card p-4 ring-1 ring-line sm:gap-4 sm:p-6 lg:h-full lg:self-stretch lg:rounded-none lg:ring-0">
           <div className="flex flex-wrap items-center gap-2">
             <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ${URGENCY[lead.urgency].cls}`}>{URGENCY[lead.urgency].label}</span>
             <span className="text-xs text-muted-foreground">{whenText(lead)}</span>
@@ -88,7 +89,7 @@ function NextActions({ actions }: { actions: NextAction[] }) {
           <LinkButton href={lead.href} variant="primary" className="w-full sm:w-fit">{lead.cta}<ArrowRight className="size-4" aria-hidden /></LinkButton>
         </article>
 
-        <div className="rounded-2xl bg-card p-3 ring-1 ring-line sm:p-4">
+        <div className="rounded-2xl bg-card p-3 ring-1 ring-line sm:p-4 lg:rounded-none lg:border-l lg:border-line lg:bg-transparent lg:py-5 lg:pr-5 lg:pl-4 lg:ring-0">
           <div className="flex items-center justify-between rounded-xl bg-muted/70 px-3 py-2 text-xs text-muted-foreground"><span>Up next</span><Link href="/pay-run" className="font-medium text-primary">Open pay run</Link></div>
           {more.length === 0 ? <p className="px-3 py-4 text-sm text-muted-foreground">That&apos;s the only item right now.</p> : (
             <ol className="mt-1">
@@ -118,7 +119,7 @@ export function Dashboard() {
   const m = useMemo(() => dashboardMetrics(state, audits, 6), [state, audits]);
   const cur = m.currency;
   const backupDays = useBackupAge();
-  const hasOwnData = state.invoices.some((i) => i.source !== "demo"); // sample data needs no backup
+  const hasOwnData = state.invoices.some((i) => i.source !== "demo" && !isSimulated(i)); // scripted examples need no backup
   const stakeText = m.atStake.map((t) => formatMoney(t.amount, t.currency)).join(" · "); // per currency, never summed
   const whole = (v: number) => new Intl.NumberFormat("en-IE", { style: "currency", currency: cur, maximumFractionDigits: 0 }).format(v);
 
@@ -171,7 +172,7 @@ export function Dashboard() {
       )}
 
       <GetStarted steps={[
-        { label: "Check one of your own invoices", done: state.invoices.some((i) => i.source === "upload" && !i.isCredit), href: "/invoices/new" },
+        { label: "Check one of your own invoices", done: state.invoices.some((i) => i.source === "upload" && !i.isCredit && !isSimulated(i)), href: "/invoices/new" },
         { label: "Review a finding", done: Object.keys(state.decisions).length > 0, href: "/invoices?status=attention" },
         { label: "Draft a dispute note", done: state.recovery.some((r) => r.notes?.includes("Note drafted in Overbill")), href: "/invoices?status=attention" },
       ]} />
@@ -186,7 +187,7 @@ export function Dashboard() {
         {([
           ["Possible overcharges", m.atStake[0] ? formatMoney(m.atStake[0].amount, m.atStake[0].currency) : formatMoney(0, cur), "/invoices?status=attention", "text-warn", m.atStake.length > 1 ? `Also ${m.atStake.slice(1).map((t) => formatMoney(t.amount, t.currency)).join(" · ")}` : "Possible, not confirmed. You decide on each invoice."],
           ["Received or credited", formatMoney(m.recovered, cur), "/recovery", "text-ok", pendingCreditNote(rs, (d) => formatMoney(d, cur)) ?? (otherCurrencyCases ? `Only ${cur}. ${otherCurrencyCases} case${otherCurrencyCases === 1 ? "" : "s"} in other currencies are on the Recovery page.` : "Only what you marked as received or applied")],
-          ["Past due", String(state.invoices.filter((i) => !i.isCredit && paymentStatusAt(i) === "overdue").length), "/invoices", "", null],
+          ["Past due", String(state.invoices.filter((i) => !i.isCredit && !isSimulated(i) && paymentStatusAt(i) === "overdue").length), "/invoices", "", null],
         ] as const).map(([label, value, href, tone, note]) => (
           <Link key={label} href={href} className={`${label === "Past due" ? "max-sm:hidden " : ""}block px-4 py-3 outline-none transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring`}>
             <p className="text-xs text-muted-foreground">{label}</p>

@@ -163,12 +163,12 @@ export function UploadFlow() {
 
           {jobs.length > 0 && (
             <Card>
-              <SectionHeader title={`${jobs.length} item${jobs.length === 1 ? "" : "s"}`} description="Files are never uploaded." />
+              <SectionHeader title={`${jobs.length} item${jobs.length === 1 ? "" : "s"}`} description="Files are read on this device and never sent to a server." />
               <ul className="divide-y divide-line">
                 <AnimatePresence initial={false}>{jobs.map((j) => <JobRow key={j.id} job={j} busy={busy} onRemove={() => remove(j.id)} onConfirm={(e) => process(j, e)} onMap={(map) => { const a = j.csv; if (!a) return; rememberMapping(a, map); process(j, undefined, mappedText(a, map)); }} />)}</AnimatePresence>
               </ul>
               {ready.length > 0 && (
-                <div className="flex justify-end border-t border-line p-4"><Button variant="primary" disabled={busy} onClick={runAll}>{busy ? <LoaderCircle className="ig-spin size-4" aria-hidden /> : null}Check {ready.length} invoice{ready.length === 1 ? "" : "s"}</Button></div>
+                <div className="flex justify-end border-t border-line p-4"><Button variant="primary" disabled={busy} onClick={runAll}>{busy ? <LoaderCircle className="ig-spin size-4" aria-hidden /> : null}Read and check {ready.length} invoice{ready.length === 1 ? "" : "s"}</Button></div>
               )}
             </Card>
           )}

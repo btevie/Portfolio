@@ -67,9 +67,8 @@ export function FileDropzone({ onFiles, accept, multiple = true, disabled, label
     <div data-slot="file-dropzone" className={cn("w-full", className)}>
       <input id={id} ref={inputRef} type="file" className="sr-only" tabIndex={-1} aria-label={inputLabel} accept={accept} multiple={multiple} disabled={disabled}
         onChange={(e) => { if (e.target.files) add(e.target.files); e.target.value = ""; }} />
-      <div
-        role="button" tabIndex={disabled ? -1 : 0} aria-disabled={disabled || undefined} aria-describedby={`${id}-hint`} data-drag={drag}
-        onClick={open}
+      <label
+        htmlFor={id} role="button" tabIndex={disabled ? -1 : 0} aria-disabled={disabled || undefined} aria-describedby={`${id}-hint`} data-drag={drag}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } }}
         onDragEnter={(e) => { e.preventDefault(); if (disabled) return; depth.current += 1; setDrag(dragKind(e)); }}
         onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = reject || disabled ? "none" : "copy"; }}
@@ -99,7 +98,7 @@ export function FileDropzone({ onFiles, accept, multiple = true, disabled, label
             {reject ? "Try PDF, image or CSV files." : <><span className="font-medium text-foreground underline decoration-input underline-offset-[3px] group-hover/drop:decoration-muted-foreground">Browse</span><span className="pointer-coarse:hidden"> or drag here</span>{hint ? ` · ${hint}` : ""}</>}
           </p>
         </div>
-      </div>
+      </label>
       <span className="sr-only" aria-live="polite">{announce}</span>
     </div>
   );

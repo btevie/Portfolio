@@ -104,7 +104,12 @@ export function applyEvent(r: RecoveryRecord, e: EventInput, asOf: ISODate): Rec
     next.followUpDate = e.date || r.followUpDate;
     next.nextStep = "Check that it arrives";
     const after = caseFigures({ ...next, status: "credit_issued" });
-    if (after.outstanding.lte(0)) { move("recovered"); next.followUpDate = undefined; next.nextStep = undefined; }
+    if (after.outstanding.lte(0) && after.resolved.gte(after.claimed)) { move("recovered"); next.followUpDate = undefined; next.nextStep = undefined; }
+    else if (after.outstanding.lte(0)) {
+      if (r.status !== "vendor_responded") move("vendor_responded");
+      next.followUpDate = undefined;
+      next.nextStep = "Ask the vendor about the remaining claim";
+    }
     else move("credit_issued");
   } else {
     const field = e.kind === "applied" ? "appliedAmount" : "recoveredAmount";
@@ -114,7 +119,12 @@ export function applyEvent(r: RecoveryRecord, e: EventInput, asOf: ISODate): Rec
     const prior = e.kind === "applied" ? base.applied : (base.legacy ? D(0) : base.received);
     next = { ...next, [field]: prior.plus(amount).toFixed(2) };
     const after = caseFigures({ ...next, status: "credit_issued" });
-    if (after.outstanding.lte(0)) { move("recovered"); next.followUpDate = undefined; next.nextStep = undefined; }
+    if (after.outstanding.lte(0) && after.resolved.gte(after.claimed)) { move("recovered"); next.followUpDate = undefined; next.nextStep = undefined; }
+    else if (after.outstanding.lte(0)) {
+      if (r.status !== "vendor_responded") move("vendor_responded");
+      next.followUpDate = undefined;
+      next.nextStep = "Ask the vendor about the remaining claim";
+    }
     else if (base.promised) { if (r.status !== "credit_issued") move("credit_issued"); next.nextStep = "Waiting for the rest"; }
     else { if (r.status !== "vendor_responded") move("vendor_responded"); next.nextStep = "Confirm what remains outstanding with the vendor"; }
   }
@@ -134,7 +144,14 @@ export function nextAction(r: RecoveryRecord, asOf: ISODate): NextAction | null 
   switch (r.status) {
     case "flagged": return { label: "Contact the vendor and record it here", overdueDays: 0, tone: "warn" };
     case "disputed": return due ? withDue(`Follow up if no reply by ${due}`, `Follow up now: no reply recorded, due ${due}`) : { label: "Record the vendor's reply when it arrives", overdueDays: 0, tone: "info" };
-    case "vendor_responded": return f.promised ? { label: "Record when the credit is applied or the refund arrives", due, overdueDays: late, tone: late > 0 ? "bad" : "info" } : { label: "Record any promised refund or credit, or dismiss if it was fine", due, overdueDays: late, tone: "warn" };
+    case "vendor_responded":
+      if (f.promised && f.resolved.gte(f.promised) && f.resolved.lt(f.claimed)) {
+        const remaining = f.claimed.minus(f.resolved).toFixed(2);
+        return due
+          ? withDue(`Ask about ${remaining} not covered by the promise`, `Follow up about ${remaining} not covered by the promise`)
+          : { label: `Ask the vendor about ${remaining} still claimed`, overdueDays: 0, tone: "warn" };
+      }
+      return f.promised ? { label: "Record when the credit is applied or the refund arrives", due, overdueDays: late, tone: late > 0 ? "bad" : "info" } : { label: "Record any promised refund or credit, or dismiss if it was fine", due, overdueDays: late, tone: "warn" };
     case "credit_issued": return withDue(`Check it arrives${due ? ` by ${due}` : ""}: ${f.outstanding.toFixed(2)} still to come`, `Overdue: ${f.outstanding.toFixed(2)} promised for ${due}, not yet recorded as received`);
     case "recovered": return null;
   }

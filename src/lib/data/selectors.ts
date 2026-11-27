@@ -85,7 +85,7 @@ export function dashboardMetrics(state: AppState, audits: Audits, monthCount = 6
     .sort(invoiceSort);
 
   // last N (default 6) calendar months ending at the latest invoice month
-  const currencyInvoices = state.invoices.filter((i) => i.currency === currency && !i.isCredit); // credit notes are not spend
+  const currencyInvoices = state.invoices.filter((i) => i.currency === currency && !i.isCredit && !isSimulated(i)); // credits and scripted examples are not real spend
   const latest = currencyInvoices.reduce((m, i) => Math.max(m, parseISO(i.date) ?? 0), 0) || Date.now();
   const end = new Date(latest);
   const months: { key: string; label: string; total: Decimal; flagged: Decimal }[] = [];
@@ -113,7 +113,7 @@ export function dashboardMetrics(state: AppState, audits: Audits, monthCount = 6
     if (m) { m.total = m.total.plus(D(invoice.total)); if (flagged) m.flagged = m.flagged.plus(D(invoice.total)); }
   }
   return {
-    currency, invoicesChecked: state.invoices.filter((i) => !i.isCredit).length, potentialOvercharges: potential, excludedCurrencies: excluded, atStake: stake.totals,
+    currency, invoicesChecked: state.invoices.filter((i) => !i.isCredit && !isSimulated(i)).length, potentialOvercharges: potential, excludedCurrencies: excluded, atStake: stake.totals,
     recovered: rec.recovered, recoveryStats: rec, needsReview, monthly: months.map((m) => ({ label: m.label, total: m.total.toNumber(), flagged: m.flagged.toNumber() })),
   };
 }
@@ -285,7 +285,7 @@ export function nextActions(state: AppState, audits: Audits, now = Date.now()): 
   const soonDays = state.settings.reminders.dueWithinDays;
   const todayMs = parseISO(today()) ?? 0;
   for (const inv of state.invoices) {
-    if (inv.isCredit) continue;
+    if (inv.isCredit || isSimulated(inv)) continue;
     const open = (audits[inv.id]?.findings ?? []).filter((f) => isOpen(state, f));
     if (!open.length) continue;
     const status = paymentStatusAt(inv);

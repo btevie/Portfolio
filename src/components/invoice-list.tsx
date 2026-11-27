@@ -115,6 +115,7 @@ export function InvoiceList() {
     const result = { all: state.invoices.length, attention: 0, clear: 0, overdue: 0, credits: 0 };
     for (const invoice of state.invoices) {
       if (invoice.isCredit) { result.credits += 1; continue; }
+      if (isSimulated(invoice)) continue; // kept in All for inspection, but not a real bill to review or pay
       const classification = effectiveClassification(state, audits[invoice.id]);
       if (classification === "CLEAR") result.clear += 1;
       else {
@@ -142,8 +143,8 @@ export function InvoiceList() {
       .filter(({ classification, searchText, invoice }) =>
         (!vendorFilter || invoice.vendorId === vendorFilter) &&
         (!needle || searchText.includes(needle)) &&
-        (!payFilter || (!invoice.isCredit && paymentStatusAt(invoice) === payFilter)) &&
-        (status === "all" || (status === "credits" ? Boolean(invoice.isCredit) : !invoice.isCredit && (status === "attention" ? classification !== "CLEAR" : status === "clear" ? classification === "CLEAR" : classification === status.toUpperCase()))),
+        (!payFilter || (!invoice.isCredit && !isSimulated(invoice) && paymentStatusAt(invoice) === payFilter)) &&
+        (status === "all" || (status === "credits" ? Boolean(invoice.isCredit) : !invoice.isCredit && !isSimulated(invoice) && (status === "attention" ? classification !== "CLEAR" : status === "clear" ? classification === "CLEAR" : classification === status.toUpperCase()))),
       )
       .sort((a, b) =>
         sort === "date_asc" ? (parseISO(a.invoice.date) ?? 0) - (parseISO(b.invoice.date) ?? 0)

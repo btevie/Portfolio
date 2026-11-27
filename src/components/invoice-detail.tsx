@@ -35,12 +35,12 @@ export function InvoiceDetail({ id }: { id: string }) {
   if (!inv || !audit) {
     return <Card><EmptyState icon={FileSearch} title="Invoice not found" action={<LinkButton href="/invoices">Back to invoices</LinkButton>}>It may have been deleted, or the demo data was reset.</EmptyState></Card>;
   }
-  const lineCmp = compareLines(inv, { today: today(), invoices: state.invoices.filter((i) => !i.isCredit), contractRates: [], config: configFromSettings(state.settings) });
+  const simulated = isSimulated(inv);
+  const lineCmp = simulated ? null : compareLines(inv, { today: today(), invoices: state.invoices.filter((i) => !i.isCredit && !isSimulated(i)), contractRates: [], config: configFromSettings(state.settings) });
   const open = audit.findings.filter((f) => isOpen(state, f));
   const cls = effectiveClassification(state, audit);
   const paymentStatus = paymentStatusAt(inv);
   const m = (v: string) => formatMoney(v, inv.currency);
-  const simulated = isSimulated(inv);
 
   return (
     <>
@@ -134,7 +134,9 @@ export function InvoiceDetail({ id }: { id: string }) {
 
         <Card>
           <SectionHeader title="Historical comparison" description={`Net charge before fees and tax`} />
-          {audit.comparison.sampleSize === 0 || !audit.comparison.reliable ? (
+          {simulated ? (
+            <EmptyState icon={History} title="Not available for demo examples">This example uses made-up figures, so it cannot show a meaningful price comparison.</EmptyState>
+          ) : audit.comparison.sampleSize === 0 || !audit.comparison.reliable ? (
             <EmptyState icon={History} title="Not enough history yet">Not enough history yet. Upload more invoices from this vendor.</EmptyState>
           ) : (
             <dl className="divide-y divide-line text-sm">

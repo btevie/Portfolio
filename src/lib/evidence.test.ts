@@ -3,7 +3,7 @@ import { auditInvoice } from "./audit/engine";
 import { D } from "./audit/money";
 import { DEFAULT_CONFIG } from "./audit/types";
 import { extractionInfo, findingGuide, isSimulated, uncertainFieldLabels } from "./evidence";
-import { atStakeByCurrency, actionQueue, auditAll } from "./data/selectors";
+import { atStakeByCurrency, actionQueue, auditAll, dashboardMetrics, nextActions } from "./data/selectors";
 import { createSeedState } from "./data/seed";
 import type { Invoice } from "./types";
 
@@ -66,6 +66,7 @@ describe("simulated invoices never count toward real totals", () => {
   it("are excluded from money at stake and the action queue, and never act as history for real invoices", () => {
     const seed = createSeedState();
     const before = atStakeByCurrency(seed, auditAll(seed));
+    const beforeDashboard = dashboardMetrics(seed, auditAll(seed));
     const sim: Invoice = { ...base, id: "sim1", vendorId: seed.vendors[0].id, vendorName: seed.vendors[0].name, extraction: "mock" };
     const withSim = { ...seed, invoices: [...seed.invoices, sim] };
     const audits = auditAll(withSim);
@@ -73,6 +74,10 @@ describe("simulated invoices never count toward real totals", () => {
     expect(isSimulated(sim)).toBe(true);
     expect(atStakeByCurrency(withSim, audits).totals).toEqual(before.totals);
     expect(actionQueue(withSim, audits).some((q) => q.invoice.id === sim.id)).toBe(false);
+    expect(nextActions(withSim, audits).some((a) => a.href.includes(sim.id))).toBe(false);
+    const afterDashboard = dashboardMetrics(withSim, audits);
+    expect(afterDashboard.invoicesChecked).toBe(beforeDashboard.invoicesChecked);
+    expect(afterDashboard.monthly).toEqual(beforeDashboard.monthly);
     expect(D(0).eq(0)).toBe(true);
   });
 });

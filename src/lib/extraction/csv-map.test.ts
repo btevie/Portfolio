@@ -16,6 +16,12 @@ describe("CSV column mapping", () => {
     expect(a.status).toBe("ready");
     expect(a.basis).toBe("exact");
   });
+  it("asks what a generic total column means, even when the required headers are exact", () => {
+    const a = analyzeCsv("description,quantity,unit_price,total\nHosting,2,10.00,20.00\nSupport,1,5.00,5.00");
+    expect(a.status).toBe("confirm");
+    expect(a.map.invoice_total).toBe(3);
+    expect(a.map.line_total).toBeNull();
+  });
   it("asks the user to confirm other headers, and shows the guess", () => {
     const a = analyzeCsv(THEIRS);
     expect(a.status).toBe("confirm");

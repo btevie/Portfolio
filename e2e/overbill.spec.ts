@@ -21,7 +21,7 @@ async function uploadAndCheck(page: Page, file: { name: string; mimeType: string
   await page.goto("/invoices/new");
   await page.getByLabel("Choose invoice files").setInputFiles(file);
   await expect(page.locator("[data-state]").filter({ hasText: file.name })).toBeVisible();
-  await page.getByRole("button", { name: /Check 1 invoice/ }).click();
+  await page.getByRole("button", { name: /Read and check 1 invoice/ }).click();
   const link = page.getByRole("link", { name: /See what we found|Open invoice/ });
   await expect(link).toBeVisible({ timeout: 15_000 });
   await link.click();
@@ -57,7 +57,9 @@ test("2. navigation works", async ({ page }) => {
 test("3. upload validates files, lets you remove them, and runs the flow", async ({ page }) => {
   await page.goto("/invoices/new");
   const input = page.getByLabel("Choose invoice files");
-  await input.setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("hello") });
+  const picker = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: /Drag invoices here/ }).click();
+  await (await picker).setFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("hello") });
   await expect(page.locator("main [role=alert]")).toContainText("isn't supported");
   await page.getByRole("button", { name: "Remove notes.txt" }).click();
   await expect(page.getByText("notes.txt")).toHaveCount(0);
@@ -68,8 +70,8 @@ test("3. upload validates files, lets you remove them, and runs the flow", async
 
   await input.setInputFiles([pdf("one-clear.pdf"), pdf("two-clear.pdf")]);
   await page.getByRole("button", { name: "Remove two-clear.pdf" }).click();
-  await expect(page.getByRole("button", { name: /Check 1 invoice$/ })).toBeVisible();
-  await page.getByRole("button", { name: /Check 1 invoice/ }).click();
+  await expect(page.getByRole("button", { name: /Read and check 1 invoice$/ })).toBeVisible();
+  await page.getByRole("button", { name: /Read and check 1 invoice/ }).click();
   await expect(page.getByRole("progressbar")).toBeVisible();
   await expect(page.getByRole("link", { name: /See what we found|Open invoice/ })).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText(/File contents not saved/)).toBeVisible();

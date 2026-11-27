@@ -53,5 +53,7 @@ export const daysBetween = (a: number, b: number): number => Math.round((b - a) 
 
 export function subtractMonths(t: number, months: number): number {
   const d = new Date(t);
-  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - months, d.getUTCDate());
+  const target = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - months, 1));
+  const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+  return Date.UTC(target.getUTCFullYear(), target.getUTCMonth(), Math.min(d.getUTCDate(), lastDay));
 }

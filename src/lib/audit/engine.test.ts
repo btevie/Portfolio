@@ -4,7 +4,7 @@ import type { ContractRate, Invoice, InvoiceLineItem, Vendor } from "../types";
 import { auditInvoice, configFromSettings } from "./engine";
 import { compareToHistory } from "./history";
 import { D } from "./money";
-import { normalizeInvoiceNumber, normalizeVendor } from "./normalize";
+import { normalizeInvoiceNumber, normalizeVendor, parseISO, subtractMonths } from "./normalize";
 import { DEFAULT_CONFIG, type AuditConfig } from "./types";
 
 const vendor: Vendor = { id: "v", name: "Acme Ltd", category: "Software", billing: "fixed", monitoring: { enabled: true, notify: true } };
@@ -149,6 +149,10 @@ describe("dates", () => {
 });
 
 describe("historical price comparison", () => {
+  it("clamps rolling history cutoffs to the last day of shorter months", () => {
+    expect(new Date(subtractMonths(parseISO("2024-03-31")!, 1)).toISOString().slice(0, 10)).toBe("2024-02-29");
+    expect(new Date(subtractMonths(parseISO("2026-03-31")!, 1)).toISOString().slice(0, 10)).toBe("2026-02-28");
+  });
   const run = (price: string, opts: Parameters<typeof ctx>[1] = {}) => {
     const h = history(6);
     const cur = invoice({ id: "cur", number: "CUR", date: "2026-10-01", dueDate: "2026-10-31", lines: [line("Plan", "1", price)], createdAt: 100 });
