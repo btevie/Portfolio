@@ -21,6 +21,7 @@ export function defaultRequest(f: AuditFinding): DisputeRequest {
   switch (f.ruleId) {
     case "arithmetic": case "tax": case "duplicate_line": case "duplicate_invoice": return "correct";
     case "contract_rate": return D(f.amountAtRisk).gt(0) ? "refund" : "correct";
+    case "unexpected_fee": return f.id.includes("ADDON_WEEE_DISPOSAL") || f.id.includes("ERR_PREMATURE_COLLECTION") ? "correct" : "explain";
     default: return "explain"; // price history, new fees, dates: first ask what it is
   }
 }
@@ -56,6 +57,25 @@ export interface DisputeKit {
   confirmed: boolean;
 }
 
+function trapSpecificGuidance(f: AuditFinding): string | null {
+  if (f.id.includes("nl-vat9")) {
+    return "Under Dutch VAT rules (Tabel I Wet OB), food, non-alcoholic catering, books, and passenger transport generally qualify for the reduced 9% BTW rate rather than 21%.";
+  }
+  if (f.id.includes("ADDON_WEEE_DISPOSAL")) {
+    return "Under EU WEEE (AEEA) regulations, retailers delivering a new appliance are required to take back the equivalent old appliance free of charge.";
+  }
+  if (f.id.includes("MED_UNBUNDLED_HYGIENE")) {
+    return "Under Dutch NZa dental tariff regulations, standard hygiene and sterilization costs are already included in the fixed treatment codes.";
+  }
+  if (f.id.includes("ERR_PREMATURE_COLLECTION")) {
+    return "Under the Dutch Collection Costs Act (WIK), a free 14-day payment reminder (14-dagenbrief) must be sent before collection fees can be charged.";
+  }
+  if (f.id.includes("ADDON_DEVICE_INS") || f.id.includes("ADDON_PAPER_BILL") || f.id.includes("ADDON_SAAS_UPSELL")) {
+    return "If this add-on was not explicitly requested, please remove it from our subscription going forward.";
+  }
+  return null;
+}
+
 function requestSentence(request: DisputeRequest, invoice: Invoice, amount: string | null, confirmed: boolean): string {
   const paid = invoice.paymentStatus === "paid";
   const at = amount ? ` of ${amount}` : "";
@@ -82,6 +102,7 @@ export function buildDisputeKit(invoice: Invoice, f: AuditFinding, decision: Fin
   const subject = `${confirmed ? "Query on" : "Clarification requested for"} invoice ${invoice.number} (${fmtDate(invoice.date)})`;
   const lineRef = lines.length === 1 ? `, line "${lines[0].description}"` : "";
   const hasCompare = f.expected && f.actual && f.difference && f.difference !== "—";
+  const legalNote = trapSpecificGuidance(f);
 
   const message = [
     `Subject: ${subject}`,
@@ -89,6 +110,7 @@ export function buildDisputeKit(invoice: Invoice, f: AuditFinding, decision: Fin
     `Hello ${invoice.vendorName} team,`,
     "",
     `I'm reviewing invoice ${invoice.number} dated ${fmtDate(invoice.date)} for ${money(invoice.total)}${lineRef}. ${confirmed ? "Our records show" : "It appears that"}: ${f.explanation}`,
+    ...(legalNote ? ["", legalNote] : []),
     ...(hasCompare ? ["", `Expected: ${f.expected} · Invoiced: ${f.actual} · Difference: ${f.difference}`] : []),
     ...(amountAtStake ? [`The amount in question is up to ${amountAtStake} including tax.`] : []),
     "",
