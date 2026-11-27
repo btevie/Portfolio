@@ -52,3 +52,26 @@ describe("groupIntoLines", () => {
     expect(l).toEqual(["Acme", "Total 65.34"]);
   });
 });
+
+describe("pdfLinesToText regressions", () => {
+  it("does not read 'VAT' in 'Total incl. VAT' as a currency", () => {
+    const t = pdfLinesToText(["Acme", "Total incl. VAT 145.44"]);
+    expect(t).toContain("Total: 145.44");
+    expect(t).not.toContain("Currency: VAT");
+  });
+  it("does not take a VAT registration number as the tax amount", () => {
+    const t = pdfLinesToText(["Acme", "VAT No: DE123456789", "VAT (19%) 19.00"]);
+    expect(t).toContain("Tax: 19.00");
+    expect(t).not.toContain("123456789");
+  });
+  it("keeps 'Total excl. VAT' and 'Total VAT' out of the grand total", () => {
+    const t = pdfLinesToText(["Acme", "Total excl. VAT 120.20", "Total VAT 25.24", "Total incl. VAT 145.44"]);
+    expect(t).toContain("Subtotal: 120.20");
+    expect(t).toContain("Tax: 25.24");
+    expect(t).toContain("Total: 145.44");
+  });
+  it("keeps shipping and payment fee rows as items", () => {
+    const t = pdfLinesToText(["Acme", "Shipping 1 5.00 5.00"]);
+    expect(t).toContain("Shipping | 1 | 5.00 | 5.00");
+  });
+});

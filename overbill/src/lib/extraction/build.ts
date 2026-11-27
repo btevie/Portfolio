@@ -22,7 +22,7 @@ export function buildInvoice(e: ExtractedInvoice, state: AppState, createdAt = D
     id, vendorId: vendor.id, vendorName: vendor.name, number, date: e.date, dueDate: e.dueDate, currency: e.currency,
     lineItems: e.lines.map((l, i) => ({ ...l, id: `${id}-l${i + 1}` })),
     subtotal: e.subtotal, discounts: e.discounts, fees: e.fees, taxAmount: e.taxAmount, taxRate: e.taxRate, total: e.total,
-    paymentStatus: "unpaid", ...(e.isCredit ? { isCredit: true } : {}), source: "upload", extraction: e.method === "mock-demo" ? "mock" : e.method, createdAt,
+    paymentStatus: "unpaid", ...(e.isCredit ? { isCredit: true } : {}), source: "upload", ...(e.confirmedFields?.length ? { uncertainFields: [...e.confirmedFields] } : {}), extraction: e.method === "mock-demo" ? "mock" : e.method, createdAt,
   };
   return { invoice, newVendor };
 }

@@ -1,21 +1,25 @@
 "use client";
-import { celebrate } from "@/lib/celebrate";
+import { AiSecondOpinionCard } from "@/components/ai-second-opinion";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Check, CheckCircle2, ChevronDown, ChevronLeft, ClipboardCopy, FileSearch, History, MailPlus, Trash2, TriangleAlert } from "lucide-react";
+import { Check, CheckCircle2, ChevronDown, ChevronLeft, FileSearch, History, MailPlus, Trash2, TriangleAlert } from "lucide-react";
 import { D, formatMoney } from "@/lib/audit/money";
 import { compareLines } from "@/lib/audit/line-compare";
 import { configFromSettings } from "@/lib/audit/engine";
 import { useAudited } from "@/lib/data/hooks";
+import { nextAction } from "@/lib/recovery";
 import { effectiveClassification, invoiceExposure, isOpen, paymentStatusAt, today } from "@/lib/data/selectors";
 import { actions } from "@/lib/data/store";
-import { draftNote } from "@/lib/dispute";
 import { fmtDate, STATUS_LABEL } from "@/lib/format";
 import { cn } from "@/lib/cn";
+import { extractionInfo, findingGuide, isSimulated, uncertainFieldLabels } from "@/lib/evidence";
+import { ruleCoverage } from "@/lib/coverage";
 import type { AuditFinding, FindingDecision, Invoice } from "@/lib/types";
-import { Textarea } from "@/components/ui/textarea";
+import { DisputeKitEditor } from "@/components/dispute-kit";
+import { buildDisputeKit } from "@/lib/dispute-kit";
+import { CreditTracker, LinkedCredits } from "@/components/credit-tracker";
 import { Button, Card, ClassBadge, Disclosure, EmptyState, LinkButton, Modal, MotionBlock, PageHeader, Reveal, Pill, SectionHeader, SeverityPill } from "@/components/ui";
 
 const Fact = ({ label, children }: { label: string; children: React.ReactNode }) => (
@@ -33,7 +37,8 @@ export function InvoiceDetail({ id }: { id: string }) {
   if (!inv || !audit) {
     return <Card><EmptyState icon={FileSearch} title="Invoice not found" action={<LinkButton href="/invoices">Back to invoices</LinkButton>}>It may have been deleted, or the demo data was reset.</EmptyState></Card>;
   }
-  const lineCmp = compareLines(inv, { today: today(), invoices: state.invoices.filter((i) => !i.isCredit), contractRates: [], config: configFromSettings(state.settings) });
+  const simulated = isSimulated(inv);
+  const lineCmp = simulated ? null : compareLines(inv, { today: today(), invoices: state.invoices.filter((i) => !i.isCredit && !isSimulated(i)), contractRates: [], config: configFromSettings(state.settings) });
   const open = audit.findings.filter((f) => isOpen(state, f));
   const cls = effectiveClassification(state, audit);
   const paymentStatus = paymentStatusAt(inv);
@@ -51,19 +56,18 @@ export function InvoiceDetail({ id }: { id: string }) {
         </>}
       />
 
-      {inv.extraction === "mock" && (
-        <div role="alert" className="mb-6 flex items-start gap-3 rounded-lg border border-bad-line bg-bad-bg px-5 py-4 text-sm text-bad">
-          <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
-          <p><strong>Simulated extraction: this is not your document.</strong> The uploaded file was never read; the figures below are a scripted demo example chosen from the file name. Do not rely on this result to pay or dispute a real invoice. Upload a CSV or paste the invoice text for a real check.</p>
-        </div>
-      )}
+      {!inv.isCredit && <SourceNotice inv={inv} />}
       {inv.isCredit && <div role="status" className="mb-4 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-primary"><strong>Credit note.</strong> This records money owed to you. It is not a bill to pay and is not audited as an invoice.</div>}
+      {inv.isCredit && <CreditTracker credit={inv} />}
+      {!inv.isCredit && (<>
       <motion.section aria-label="Verdict" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
-        className={cn("relative mb-4 overflow-hidden rounded-2xl border-l-4 bg-card p-4 ring-1 ring-line sm:mb-6 sm:p-6", open.length === 0 && cls === "CLEAR" ? "border-l-ok" : "border-l-warn")}>
-        <p className={cn("relative flex items-center gap-2 text-lg font-semibold", open.length === 0 && cls === "CLEAR" ? "text-ok" : "text-warn")}>
-          {open.length === 0 && cls === "CLEAR" ? <><CheckCircle2 className="size-6 shrink-0" aria-hidden />{inv.isCredit ? "Credit note" : "Nothing flagged by our checks"}</> : <><TriangleAlert className="size-6 shrink-0" aria-hidden />{cls === "LIKELY_ERROR" ? "Hold payment until you've reviewed this" : "Check before you pay"}</>}
+        className={cn("relative mb-4 overflow-hidden rounded-2xl border-l-4 bg-card p-4 ring-1 ring-line sm:mb-6 sm:p-6", !simulated && open.length === 0 && cls === "CLEAR" ? "border-l-ok" : "border-l-warn")}>
+        <p className={cn("relative flex items-center gap-2 text-lg font-semibold", !simulated && open.length === 0 && cls === "CLEAR" ? "text-ok" : "text-warn")}>
+          {simulated ? <><TriangleAlert className="size-6 shrink-0" aria-hidden />Demo example: not an audit of your bill</> : open.length === 0 && cls === "CLEAR" ? <><CheckCircle2 className="size-6 shrink-0" aria-hidden />{inv.isCredit ? "Credit note" : "Nothing flagged by our checks"}</> : <><TriangleAlert className="size-6 shrink-0" aria-hidden />{cls === "LIKELY_ERROR" ? "Hold payment until you've reviewed this" : "Check before you pay"}</>}
         </p>
-        {open.length > 0 ? (
+        {simulated ? (
+          <p className="relative mt-2 text-sm text-muted-foreground">Overbill did not read your file, so there is no real result. The findings below only show what a check looks like on made-up figures. They are not counted in your totals, and you cannot dispute or track them.</p>
+        ) : open.length > 0 ? (
           <div className="relative mt-4 sm:mt-6">
             <p className="text-sm text-muted-foreground">Possible overcharge on this invoice <span className="text-xs">(&ldquo;at stake&rdquo; = money you might get back if the findings are real)</span></p>
             <p className="num mt-0.5 text-3xl font-semibold tracking-tight sm:text-4xl">{formatMoney(invoiceExposure(open, inv.total), inv.currency)}</p>
@@ -79,9 +83,12 @@ export function InvoiceDetail({ id }: { id: string }) {
         {audit.findings.length === 0 ? (
           <Card><EmptyState icon={Check} title={inv.isCredit ? "Credit note not audited" : "No findings"}>{inv.isCredit ? "This credit note is recorded separately and is not run through bill checks." : "Everything looks consistent with the checks we ran. That is not proof the invoice is right; compare it with your contract or order if something feels off."}</EmptyState></Card>
         ) : (
-          <div className="space-y-3">{audit.findings.map((f, i) => <MotionBlock key={f.id} i={i}><FindingCard f={f} inv={inv} first={f.id === open[0]?.id} onNote={() => setNoteFor([f])} /></MotionBlock>)}</div>
+          <div className="space-y-3">{audit.findings.map((f, i) => <MotionBlock key={f.id} i={i}><FindingCard f={f} inv={inv} simulated={simulated} first={f.id === open[0]?.id} onNote={() => setNoteFor([f])} /></MotionBlock>)}</div>
         )}
       </section>
+      {!inv.isCredit && !simulated && <Coverage inv={inv} />}
+      <LinkedCredits bill={inv} />
+      </>)}
       <Disclosure className="mb-4" title="Invoice details & history" subtitle="Line items, dates and tax" aside={<span className="num text-sm font-semibold">{m(inv.total)}</span>}>
         <div>
       <Card className="mb-6 rounded-[28px] p-5">
@@ -129,7 +136,9 @@ export function InvoiceDetail({ id }: { id: string }) {
 
         <Card>
           <SectionHeader title="Historical comparison" description={`Net charge before fees and tax`} />
-          {audit.comparison.sampleSize === 0 || !audit.comparison.reliable ? (
+          {simulated ? (
+            <EmptyState icon={History} title="Not available for demo examples">This example uses made-up figures, so it cannot show a meaningful price comparison.</EmptyState>
+          ) : audit.comparison.sampleSize === 0 || !audit.comparison.reliable ? (
             <EmptyState icon={History} title="Not enough history yet">Not enough history yet. Upload more invoices from this vendor.</EmptyState>
           ) : (
             <dl className="divide-y divide-line text-sm">
@@ -143,6 +152,7 @@ export function InvoiceDetail({ id }: { id: string }) {
           )}
         </Card>
       </div>
+      <AiSecondOpinionCard invoice={inv} />
       {lineCmp && (
         <Card className="mt-6">
           <SectionHeader title={`Line by line vs ${lineCmp.previous.number}`} description={`Previous invoice from ${lineCmp.previous.vendorName}, ${fmtDate(lineCmp.previous.date)}. Lines are paired only when the descriptions match exactly; a price change is something to ask about, not a confirmed error.`} />
@@ -171,7 +181,7 @@ export function InvoiceDetail({ id }: { id: string }) {
       </Disclosure>
 
       <Modal open={noteFor !== null} onClose={() => setNoteFor(null)} title="Dispute or clarification note" wide>
-        {noteFor && <NoteEditor key={noteFor.map((f) => f.id).join()} inv={inv} findings={noteFor} onDone={() => setNoteFor(null)} />}
+        {noteFor && <DisputeKitEditor key={noteFor.map((f) => f.id).join()} inv={inv} findings={noteFor} onDone={() => setNoteFor(null)} />}
       </Modal>
       <Modal open={confirmDelete} onClose={() => setConfirmDelete(false)} title="Delete this invoice?">
         <p className="text-sm text-muted-foreground">This removes the invoice and its findings. Recovery cases are kept.</p>
@@ -181,7 +191,30 @@ export function InvoiceDetail({ id }: { id: string }) {
   );
 }
 
-function FindingCard({ f, inv, onNote, first }: { f: AuditFinding; inv: Invoice; onNote: () => void; first?: boolean }) {
+/** What each check could and could not look at on this bill, so "nothing found" is read for what it is. */
+function Coverage({ inv }: { inv: Invoice }) {
+  const { state, audits } = useAudited();
+  const audit = audits[inv.id];
+  if (!audit) return null;
+  const rows = ruleCoverage(inv, audit, state);
+  const limited = rows.filter((r) => r.status !== "ran");
+  return (
+    <Disclosure title="What the checks could see" subtitle={limited.length ? `${rows.length - limited.length} of ${rows.length} checks had what they needed` : `All ${rows.length} checks had what they needed`}>
+      <ul className="divide-y divide-line px-5">
+        {rows.map((r) => (
+          <li key={r.id} className="flex items-start justify-between gap-3 py-2.5 text-sm">
+            <span className="min-w-0"><span className="font-medium">{r.name}</span>{r.why && <span className="mt-0.5 block text-xs text-muted-foreground">{r.why}</span>}</span>
+            <Pill tone={r.status === "ran" ? "ok" : "warn"}>{r.status === "ran" ? "Checked" : r.status === "off" ? "Off" : "Limited"}</Pill>
+          </li>
+        ))}
+      </ul>
+      <p className="px-5 pb-4 text-xs text-muted-foreground">&ldquo;Nothing flagged&rdquo; means no anomalies were found by the checks that could run. It does not mean the bill is correct.</p>
+    </Disclosure>
+  );
+}
+
+function FindingCard({ f, inv, onNote, first, simulated }: { f: AuditFinding; inv: Invoice; onNote: () => void; first?: boolean; simulated?: boolean }) {
+  const guide = findingGuide(f, inv);
   const { state } = useAudited();
   const sp = useSearchParams();
   const [toggled, setExpanded] = useState<boolean | null>(null);
@@ -189,7 +222,10 @@ function FindingCard({ f, inv, onNote, first }: { f: AuditFinding; inv: Invoice;
   const expanded = toggled ?? (requested ? requested === f.id : Boolean(first)); // open the finding you came for, else the first open one; the user can still collapse it
   const decision = state.decisions[f.id] ?? "open";
   const [undo, setUndo] = useState<{ from: FindingDecision; label: string } | null>(null);
-  const decide = (to: FindingDecision, label: string) => { setUndo({ from: decision, label }); actions.setDecision(f.id, to); };
+  const [asking, setAsking] = useState(false);
+  const [reason, setReason] = useState("");
+  const decide = (to: FindingDecision, label: string, why?: string) => { setUndo({ from: decision, label }); actions.setDecision(f.id, to, why); setAsking(false); setReason(""); };
+  const savedReason = state.decisionReasons?.[f.id];
   const record = state.recovery.find((r) => r.findingId === f.id);
   const dismissed = !isOpen(state, f);
   const panel = `finding-${f.id.replace(/[^a-z0-9]/gi, "-")}`;
@@ -199,81 +235,114 @@ function FindingCard({ f, inv, onNote, first }: { f: AuditFinding; inv: Invoice;
     <Card className={cn("overflow-hidden rounded-[28px]", dismissed && "opacity-70")}>
       <div className="p-4">
         <div className="mb-2 flex flex-wrap items-center gap-2">
-          <ClassBadge value={f.classification} size="sm" /><SeverityPill value={f.severity} />
+          {simulated && <Pill tone="bad">Simulated, not your bill</Pill>}<ClassBadge value={f.classification} size="sm" /><SeverityPill value={f.severity} />
           {decision === "confirmed" ? <Pill tone="bad">Confirmed error</Pill> : decision === "dismissed" ? <Pill>Dismissed</Pill> : null}
         </div>
         <div className="flex items-start justify-between gap-3"><div><h3 className="display text-base font-semibold text-ink">{f.title}</h3><p className="mt-1 text-xs text-muted-foreground">Difference: <span className="font-semibold text-warn">{f.difference}</span></p></div><span className="num shrink-0 text-sm font-semibold text-ink">{D(f.amountAtRisk).gt(0) ? formatMoney(f.amountAtRisk, inv.currency) : ""}</span></div>
-        {expanded && <div className="mt-3 space-y-3"><p className="text-sm text-muted-foreground">{f.explanation}</p><dl className="grid grid-cols-3 divide-x divide-line rounded-md border border-line bg-raised [&>div]:px-3 [&>div]:py-2">{row("Should be", f.expected)}{row("Invoice says", f.actual)}{row("Difference", f.difference)}</dl></div>}
+        {expanded && <div className="mt-3 space-y-3"><p className="text-sm text-muted-foreground">{f.explanation}</p><dl className="grid grid-cols-1 divide-y divide-line rounded-md border border-line bg-raised sm:grid-cols-3 sm:divide-x sm:divide-y-0 [&>div]:px-3 [&>div]:py-2">{row("Should be", f.expected)}{row("Invoice says", f.actual)}{row("Difference", f.difference)}</dl></div>}
         <button type="button" aria-expanded={expanded} aria-controls={panel} onClick={() => setExpanded(!expanded)} className="mt-2 inline-flex min-h-8 cursor-pointer items-center gap-1 text-sm font-semibold text-primary hover:underline">
           {expanded ? "Hide details" : "View details"}<ChevronDown className={cn("size-4 transition-transform duration-150", expanded && "rotate-180")} aria-hidden />
         </button>
       </div>
       <AnimatePresence initial={false}>{expanded && (
         <Reveal><div id={panel} className="space-y-4 border-t border-line bg-canvas/70 px-5 py-4 text-sm">
+          <EvidenceBlock guide={guide} simulated={simulated} />
           <div><h4 className="eyebrow">Why we flagged this</h4><ul className="mt-1.5 list-disc space-y-1 pl-5">{f.evidence.map((e, i) => <li key={i}>{e}</li>)}</ul></div>
           <div><h4 className="eyebrow">How sure are we? (confidence)</h4><p className="mt-1.5">{f.confidenceReason}</p></div>
           <div><h4 className="eyebrow">What we can&apos;t be sure about</h4><p className="mt-1.5">{f.uncertainty}</p></div>
-          <div><h4 className="eyebrow">What to do next</h4><p className="mt-1.5">{f.recommendedAction}</p></div>
+          <div>
+            <h4 className="eyebrow">What to do next</h4>
+            <p className="mt-1.5">{f.recommendedAction}</p>
+            <div className="mt-2.5 flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  const kit = buildDisputeKit(inv, f, decision, "");
+                  const draft = `Subject: ${kit.subject}\n\n${kit.message}`;
+                  void navigator.clipboard?.writeText(draft);
+                  setUndo({ from: decision, label: "Dispute email copied to clipboard" });
+                }}
+              >
+                <MailPlus className="mr-1.5 size-3.5" aria-hidden />
+                Copy dispute email
+              </Button>
+            </div>
+          </div>
           {D(f.amountAtRisk).gt(0) && <p className="num text-muted-foreground">Amount at stake (incl. tax): <strong className="text-ink">{formatMoney(f.amountAtRisk, inv.currency)}</strong></p>}
           <p role="status" className="min-h-5 text-sm text-muted-foreground">{undo && <>{undo.label}. <button type="button" className="min-h-11 cursor-pointer font-semibold text-primary hover:underline" onClick={() => { actions.setDecision(f.id, undo.from); setUndo(null); }}>Undo</button></>}</p>
+          {simulated ? <p className="border-t border-line pt-4 text-sm text-muted-foreground">Decisions, notes and tracking are switched off for simulated results, because they would describe a bill that does not exist.</p> : (
+          <>
+          {savedReason && decision !== "open" && <p className="text-sm text-muted-foreground"><span className="font-medium text-ink">Your reason:</span> {savedReason}</p>}
+          {asking && (
+            <div className="space-y-2 rounded-xl bg-card p-3 ring-1 ring-line">
+              <label htmlFor={`why-${panel}`} className="text-sm font-medium">Why is this fine? <span className="font-normal text-muted-foreground">(kept with your decision; optional)</span></label>
+              <div className="flex flex-wrap gap-2">{["Agreed with the vendor", "Already sorted out", "I misread the bill", "Normal for this vendor"].map((t) => <button key={t} type="button" onClick={() => setReason(t)} className="min-h-11 cursor-pointer rounded-full bg-muted px-3 text-sm sm:min-h-9">{t}</button>)}</div>
+              <input id={`why-${panel}`} value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} className="h-11 w-full rounded-xl border bg-canvas px-3 text-sm" placeholder="e.g. Price rise is in the renewal notice" />
+              <div className="flex gap-2"><Button size="sm" variant="primary" onClick={() => decide("dismissed", "Dismissed", reason)}>Dismiss finding</Button><Button size="sm" onClick={() => setAsking(false)}>Cancel</Button></div>
+            </div>
+          )}
           <div className="flex flex-wrap gap-2 border-t border-line pt-4 [&>*]:max-sm:min-h-11 [&>*]:max-sm:flex-1">
             {decision !== "confirmed" && <Button size="sm" onClick={() => decide("confirmed", "Marked as confirmed")}>I agree: confirm this is an error</Button>}
-            {decision !== "dismissed" ? <Button size="sm" onClick={() => decide("dismissed", "Dismissed")}>Dismiss: this is expected</Button> : <Button size="sm" onClick={() => actions.setDecision(f.id, "open")}>Reopen</Button>}
+            {decision !== "dismissed" ? <Button size="sm" onClick={() => setAsking(true)} aria-expanded={asking}>Dismiss: this is expected</Button> : <Button size="sm" onClick={() => actions.setDecision(f.id, "open")}>Reopen</Button>}
             <Button size="sm" onClick={onNote}><MailPlus className="size-3.5" aria-hidden />Draft note</Button>
-            {record ? <LinkButton href="/recovery" size="sm">In tracker: {STATUS_LABEL[record.status]}</LinkButton>
+            {record ? <LinkButton href={`/recovery?case=${encodeURIComponent(record.id)}`} size="sm">Open case: {STATUS_LABEL[record.status]}{(() => { const a = nextAction(record, today()); return a && a.overdueDays > 0 ? " · follow-up overdue" : ""; })()}</LinkButton>
               : D(f.amountAtRisk).gt(0) && <Button size="sm" onClick={() => actions.addRecovery({ vendorId: inv.vendorId, vendorName: inv.vendorName, invoiceId: inv.id, findingId: f.id, title: f.title, amount: f.amountAtRisk, currency: inv.currency, notes: "" })}>Track in Recovery</Button>}
-          </div>
+          </div></>)}
         </div></Reveal>
       )}</AnimatePresence>
     </Card>
   );
 }
 
-function NoteEditor({ inv, findings, onDone }: { inv: Invoice; findings: AuditFinding[]; onDone: () => void }) {
-  const { state } = useAudited();
-  const [text, setText] = useState(() => draftNote(inv, findings, state.decisions, state.user.name));
-  const [copied, setCopied] = useState<"idle" | "ok" | "fail">("idle");
-  const [logged, setLogged] = useState(false);
-  const dirty = useMemo(() => text !== draftNote(inv, findings, state.decisions, state.user.name), [text, inv, findings, state.decisions, state.user.name]);
 
-  // Most mail apps cap the link length, so a long note is trimmed here; "Copy to clipboard" always has the full text.
-  const mailto = `mailto:?subject=${encodeURIComponent(`Invoice ${inv.number}: query about charges`)}&body=${encodeURIComponent(text.length > 1800 ? `${text.slice(0, 1800)}\n…` : text)}`;
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied("ok");
-    } catch {
-      const ta = document.getElementById("note-text") as HTMLTextAreaElement | null; // fall back to manual copy
-      ta?.select();
-      try { setCopied(document.execCommand("copy") ? "ok" : "fail"); } catch { setCopied("fail"); }
-    }
+/** Where the invoice's figures came from, shown above the verdict. Simulated extraction gets an unmissable alert. */
+function SourceNotice({ inv }: { inv: Invoice }) {
+  const info = extractionInfo(inv);
+  const unc = uncertainFieldLabels(inv);
+  if (info.kind === "simulated") {
+    return (
+      <div role="alert" className="mb-6 flex items-start gap-3 rounded-lg border border-bad-line bg-bad-bg px-4 py-4 text-sm text-bad sm:px-5">
+        <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+        <div className="min-w-0 space-y-1.5">
+          <p><strong>Simulated extraction: this is not your document.</strong></p>
+          <p>{info.detail}</p>
+          <p>Do not use this result to pay or dispute a real invoice. For a real check, upload a CSV, paste the invoice text, or use a PDF whose text you can select.</p>
+        </div>
+      </div>
+    );
   }
-
-  function logDisputed() {
-    for (const f of findings) {
-      const existing = state.recovery.find((r) => r.findingId === f.id);
-      // Never move a case backwards: a recovered, credited or dismissed record must not be reverted by re-logging a dispute.
-      if (existing) { if (existing.status === "flagged") actions.updateRecovery(existing.id, { status: "disputed" }); }
-      else actions.addRecovery({ vendorId: inv.vendorId, vendorName: inv.vendorName, invoiceId: inv.id, findingId: f.id, title: f.title, amount: f.amountAtRisk, currency: inv.currency, status: "disputed", notes: "Note drafted in Overbill and sent by me." });
-    }
-    celebrate({ kind: "step", message: "Dispute logged" });
-    setLogged(true);
-  }
-
+  if (info.kind === "sample") return <p className="mb-4 text-xs text-muted-foreground">{info.label}. {info.detail}</p>;
   return (
-    <div>
-      <p className="mb-3 rounded-md bg-primary-soft px-3 py-2 text-sm text-primary">Overbill never sends anything. Read and edit it, check it against your contract, then send it yourself. It is a draft, not legal advice.</p>
-      <label htmlFor="note-text" className="mb-1.5 block text-sm font-medium">Draft note {dirty && <span className="font-normal text-muted-foreground">· edited</span>}</label>
-      <Textarea id="note-text" value={text} onChange={(e) => { setText(e.target.value); setCopied("idle"); }} rows={16} className="font-mono text-sm leading-relaxed" />
-      <p role="status" className="mt-2 min-h-5 text-sm">
-        {copied === "ok" && <span className="text-ok">Copied to clipboard.</span>}
-        {copied === "fail" && <span className="text-bad">Couldn&apos;t access the clipboard. Select the text and copy it yourself.</span>}
-        {logged && <span className="text-ok"> Logged as disputed in Recovery.</span>}
-      </p>
-      <div className="mt-3 flex flex-wrap justify-between gap-2">
-        <Button onClick={logDisputed} disabled={logged || findings.every((f) => D(f.amountAtRisk).isZero())}>I sent it, log as disputed</Button>
-        <div className="flex flex-wrap gap-2"><Button onClick={onDone}>Close</Button><a href={mailto} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-input px-3 text-sm font-medium hover:bg-muted"><MailPlus className="size-4" aria-hidden />Open in email app</a><Button variant="primary" onClick={copy}>{copied === "ok" ? <Check className="size-4" aria-hidden /> : <ClipboardCopy className="size-4" aria-hidden />}{copied === "ok" ? "Copied" : "Copy to clipboard"}</Button></div>
+    <div className="mb-4 rounded-xl bg-card px-4 py-3 text-sm ring-1 ring-line">
+      <p className="font-medium">{info.label}</p>
+      <p className="mt-1 text-muted-foreground">{info.detail}</p>
+      {unc.length > 0 && <p className="mt-1 text-muted-foreground">You confirmed the {unc.join(", ")} during review because Overbill was unsure.</p>}
+    </div>
+  );
+}
+
+/** What was checked, the exact figures compared with where each came from, and what to verify on the paper bill. */
+function EvidenceBlock({ guide, simulated }: { guide: ReturnType<typeof findingGuide>; simulated?: boolean }) {
+  return (
+    <div className="space-y-4">
+      <div><h4 className="eyebrow">What we checked</h4><p className="mt-1.5"><strong className="font-semibold">{guide.ruleName}.</strong> {guide.checked}</p></div>
+      <div>
+        <h4 className="eyebrow">Figures compared and where they came from</h4>
+        <ul className="mt-1.5 divide-y divide-line rounded-md border border-line bg-card">
+          {guide.compared.map((row) => (
+            <li key={row.label} className="grid gap-0.5 px-3 py-2 sm:grid-cols-[7rem_1fr] sm:gap-3">
+              <span className="text-xs font-medium text-muted-foreground">{row.label}</span>
+              <span className="min-w-0"><span className="num block break-words font-semibold">{row.value}</span><span className="block text-xs text-muted-foreground">{row.from}</span></span>
+            </li>
+          ))}
+        </ul>
+      </div>
+      {guide.readingNotes.length > 0 && <div><h4 className="eyebrow">How reliable the reading is</h4><ul className="mt-1.5 list-disc space-y-1 pl-5">{guide.readingNotes.map((n, i) => <li key={i}>{n}</li>)}</ul></div>}
+      <div>
+        <h4 className="eyebrow">{simulated ? "What to do" : "Verify on the original bill"}</h4>
+        <ol className="mt-1.5 list-decimal space-y-1 pl-5">{guide.verify.map((v, i) => <li key={i}>{v}</li>)}</ol>
       </div>
     </div>
   );

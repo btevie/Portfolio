@@ -49,7 +49,9 @@ export interface Invoice {
   paymentStatus: PaymentStatus;
   source: "demo" | "upload";
   /** How the figures were obtained. "mock" = scripted demo data; the uploaded file was NOT read. */
-  extraction?: "mock" | "csv" | "text" | "pdf";
+  extraction?: "mock" | "csv" | "text" | "pdf" | "ocr";
+  /** Fields Overbill could not read confidently and the user confirmed before the audit ran (for example "date"). */
+  uncertainFields?: string[];
   /** A credit note: the vendor owes you this amount. Amounts are stored positive; it is tracked, not audited, and never counted as spend or money at stake. */
   isCredit?: boolean;
   /** Monotonic ordering used to break date ties (original before re-send). */
@@ -76,6 +78,17 @@ export interface Vendor {
   /** Currency of `expectedAmount`; keeps comparisons within the same currency. */
   expectedCurrency?: Currency;
   monitoring: { enabled: boolean; notify: boolean };
+  /** What you agreed with this vendor. All optional: Overbill only uses what you enter. */
+  contract?: VendorContract;
+}
+
+export interface VendorContract {
+  /** When the agreement renews (YYYY-MM-DD). */
+  renewalDate?: ISODate;
+  /** Days of notice needed to cancel or renegotiate before the renewal date. */
+  noticeDays?: number;
+  /** The most the price may rise at renewal, in percent. A higher increase is flagged. */
+  upliftCapPct?: string;
 }
 
 export interface VendorBaseline {
@@ -152,7 +165,7 @@ export type RecoveryStatus =
   | "dismissed";
 
 export type RecoveryEventKind =
-  | "opened" | "note" | "status" | "disputed" | "vendor_response" | "credit_issued" | "received"
+  | "opened" | "note" | "status" | "disputed" | "vendor_response" | "credit_issued" | "applied" | "received"
   | "correction" | "next_step" | "deadline" | "edit" | "closed" | "reopened";
 
 /** One entry in a case's history. `at` is when the user recorded it; `date` is the real-world date they report. */
@@ -193,12 +206,51 @@ export interface RecoveryRecord {
   source?: "demo" | "user";
   /** Total the vendor has agreed to give back (includes anything already received). */
   confirmedAmount?: string;
-  /** Money actually received (refund paid or credit applied), backed by a recorded reference. */
+  /** Refund money actually received (self-reported; a reference is optional but encouraged). */
   recoveredAmount?: string;
+  /** Credit the user reports was applied to their account (self-reported). Kept apart from cash received. */
+  appliedAmount?: string;
   nextStep?: string;
   followUpDate?: ISODate;
   deadline?: RecoveryDeadline;
   events?: RecoveryEvent[];
+}
+
+/**
+ * Credit-note tracking. A credit note being *issued* says nothing about whether the money came back, so the
+ * outcome is only ever what the user confirms. The history is append-only: mistakes are reversed, never edited away.
+ */
+export type CreditEventKind = "linked" | "unlinked" | "applied" | "refunded" | "reversed" | "note";
+
+export interface CreditEvent {
+  id: string;
+  /** When the user recorded it (ISO timestamp). */
+  at: string;
+  kind: CreditEventKind;
+  text: string;
+  /** Settlement events: how much of the credit this settled (positive decimal, credit's currency). */
+  amount?: string;
+  /** Settlement events: the real-world date the user reports. */
+  date?: ISODate;
+  /** Evidence: refund reference, remittance advice, statement line, credit-application number… */
+  reference?: string;
+  /** The bill this event links to, or that the credit was applied to. */
+  invoiceId?: string;
+  /** Snapshot of "vendor · number" so the history still reads after that bill is deleted. */
+  invoiceLabel?: string;
+  /** For `reversed`: the id of the settlement event being undone. */
+  reverses?: string;
+  /** Settlement events: the user ticked "I checked this against my statement / bank". */
+  confirmed?: boolean;
+}
+
+export interface CreditRecord {
+  id: string;
+  /** The credit note (an `Invoice` with `isCredit`) this record tracks. */
+  creditId: string;
+  /** The invoice or later bill the user says this credit relates to. Unset = unmatched. */
+  relatedInvoiceId?: string;
+  events: CreditEvent[];
 }
 
 export type Sensitivity = "relaxed" | "balanced" | "strict";
@@ -256,6 +308,10 @@ export interface AppState {
   invoices: Invoice[];
   contractRates: ContractRate[];
   recovery: RecoveryRecord[];
+  /** Tracking for credit notes. Missing in data saved by older versions (treated as empty). */
+  credits: CreditRecord[];
   decisions: Record<string, FindingDecision>;
+  /** Why the user dismissed or confirmed a finding, keyed by finding id. Absent in data saved by older versions. */
+  decisionReasons?: Record<string, string>;
   settings: UserSettings;
 }

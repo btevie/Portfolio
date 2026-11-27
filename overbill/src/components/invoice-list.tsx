@@ -5,12 +5,15 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowUpDown, ArrowUpRight, Check, ChevronDown, ChevronLeft, ChevronRight, FileText, Search, X } from "lucide-react";
-import { formatMoney } from "@/lib/audit/money";
+import { D, formatMoney } from "@/lib/audit/money";
 import { parseISO } from "@/lib/audit/normalize";
 import { useAudited } from "@/lib/data/hooks";
+import { isSimulated } from "@/lib/evidence";
 import { atStakeByCurrency, effectiveClassification, invoiceExposure, isOpen, paymentStatusAt } from "@/lib/data/selectors";
 import { fmtDate } from "@/lib/format";
 import { cn } from "@/lib/cn";
+import { CreditStatusPill } from "@/components/credit-tracker";
+import { allCreditPositions, creditBalanceByCurrency, creditsToResolve, formatBalances } from "@/lib/credits";
 import { ClassBadge, CountUp, EmptyState, LinkButton, MotionItem, MotionRow, Pill } from "@/components/ui";
 
 const SORTS = {
@@ -24,6 +27,7 @@ const FILTERS = [
   { value: "all", label: "All" },
   { value: "attention", label: "Needs review" },
   { value: "clear", label: "Nothing flagged" },
+  { value: "credits", label: "Credit notes" },
 ] as const;
 
 /** Soft, friendly vendor avatar: a stable hue per vendor so the list is scannable at a glance. */
@@ -105,10 +109,13 @@ export function InvoiceList() {
   };
   const setQ = (value: string) => { setQState(value); set("q", value); };
 
+  const creditPos = useMemo(() => new Map(allCreditPositions(state).map((p) => [p.credit.id, p])), [state]);
+  const creditsToDo = useMemo(() => creditsToResolve(state), [state]);
   const counts = useMemo(() => {
-    const result = { all: state.invoices.length, attention: 0, clear: 0, overdue: 0 };
+    const result = { all: state.invoices.length, attention: 0, clear: 0, overdue: 0, credits: 0 };
     for (const invoice of state.invoices) {
-      if (invoice.isCredit) continue;
+      if (invoice.isCredit) { result.credits += 1; continue; }
+      if (isSimulated(invoice)) continue; // kept in All for inspection, but not a real bill to review or pay
       const classification = effectiveClassification(state, audits[invoice.id]);
       if (classification === "CLEAR") result.clear += 1;
       else {
@@ -129,15 +136,15 @@ export function InvoiceList() {
           invoice,
           classification: effectiveClassification(state, audits[invoice.id]),
           finding: open[0],
-          amountAtRisk: invoiceExposure(open, invoice.total),
+          amountAtRisk: isSimulated(invoice) ? D(0) : invoiceExposure(open, invoice.total), // an invented bill has no real money at stake
           searchText: `${invoice.vendorName} ${invoice.number} ${invoice.isCredit ? "credit note" : ""} ${open.map((finding) => finding.title).join(" ")}`.toLowerCase(),
         };
       })
       .filter(({ classification, searchText, invoice }) =>
         (!vendorFilter || invoice.vendorId === vendorFilter) &&
         (!needle || searchText.includes(needle)) &&
-        (!payFilter || (!invoice.isCredit && paymentStatusAt(invoice) === payFilter)) &&
-        (status === "all" || (!invoice.isCredit && (status === "attention" ? classification !== "CLEAR" : status === "clear" ? classification === "CLEAR" : classification === status.toUpperCase()))),
+        (!payFilter || (!invoice.isCredit && !isSimulated(invoice) && paymentStatusAt(invoice) === payFilter)) &&
+        (status === "all" || (status === "credits" ? Boolean(invoice.isCredit) : !invoice.isCredit && !isSimulated(invoice) && (status === "attention" ? classification !== "CLEAR" : status === "clear" ? classification === "CLEAR" : classification === status.toUpperCase()))),
       )
       .sort((a, b) =>
         sort === "date_asc" ? (parseISO(a.invoice.date) ?? 0) - (parseISO(b.invoice.date) ?? 0)
@@ -226,8 +233,8 @@ export function InvoiceList() {
               <SortMenu value={sort} onChange={(v) => set("sort", v)} />
             </div>
 
-            <div role="group" aria-label="Filter invoices by status" className="mt-3 grid grid-cols-3 gap-2">
-              {FILTERS.map((f) => {
+            <div role="group" aria-label="Filter invoices by status" className={cn("mt-3 grid gap-2", counts.credits > 0 ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-3")}>
+              {FILTERS.filter((f) => f.value !== "credits" || counts.credits > 0).map((f) => {
                 const active = status === f.value;
                 return (
                   <motion.button key={f.value} type="button" aria-pressed={active} whileTap={{ scale: 0.94 }} onClick={() => set("status", f.value)}
@@ -251,6 +258,13 @@ export function InvoiceList() {
                 </select></label>
             </div>
 
+            {status === "credits" && (
+              <div role="status" className="mt-4 rounded-xl bg-muted px-4 py-3 text-sm">
+                {creditsToDo.length === 0
+                  ? <p>Every credit note is confirmed applied or refunded.</p>
+                  : <p><strong>{creditsToDo.length} credit note{creditsToDo.length === 1 ? " needs" : "s need"} you.</strong> {creditsToDo.filter((p) => p.status === "unmatched").length > 0 && <>{creditsToDo.filter((p) => p.status === "unmatched").length} not matched to a bill. </>}Open one to match it and confirm whether it was applied or refunded. Still unaccounted for: <span className="num font-semibold">{formatBalances(creditBalanceByCurrency(creditsToDo))}</span>. Credit notes are never counted in spending or amounts to pay.</p>}
+              </div>
+            )}
             {rows.length === 0 ? (
               <EmptyState icon={Search} title="Nothing matches that" action={<button type="button" onClick={() => { setQ(""); set("status", "all"); set("vendor", ""); set("pay", ""); }} className="min-h-11 text-sm font-semibold text-primary hover:underline">Clear filters</button>}>Try a different search or filter to see more invoices.</EmptyState>
             ) : (
@@ -272,7 +286,7 @@ export function InvoiceList() {
                                 <div className="flex shrink-0 flex-col items-end gap-1"><p className="num text-sm font-semibold leading-tight">{formatMoney(invoice.total, invoice.currency)}</p>
                                   {amountAtRisk.gt(0)
                                     ? <span className={cn("num text-xs font-medium", "text-warn")}>{formatMoney(amountAtRisk, invoice.currency)} possible overcharge</span>
-                                    : <span className={cn("inline-flex items-center gap-1.5 text-xs font-medium", invoice.isCredit ? "text-ok" : paymentStatusAt(invoice) === "overdue" ? "text-bad" : classification === "CLEAR" ? "text-ok" : "text-warn")}><span aria-hidden className="size-1.5 rounded-full bg-current" />{invoice.isCredit ? "Credit note" : paymentStatusAt(invoice) === "overdue" ? "Past due" : classification === "CLEAR" ? "Clear" : "Review"}</span>}
+                                    : <span className={cn("inline-flex items-center gap-1.5 text-xs font-medium", invoice.isCredit ? (creditPos.get(invoice.id)?.status === "settled" ? "text-ok" : "text-warn") : paymentStatusAt(invoice) === "overdue" ? "text-bad" : classification === "CLEAR" ? "text-ok" : "text-warn")}><span aria-hidden className="size-1.5 rounded-full bg-current" />{invoice.isCredit ? `Credit · ${creditPos.get(invoice.id)?.status === "settled" ? "settled" : creditPos.get(invoice.id)?.status === "unmatched" ? "unmatched" : "to confirm"}` : isSimulated(invoice) ? "Simulated example" : paymentStatusAt(invoice) === "overdue" ? "Past due" : classification === "CLEAR" ? "Clear" : "Review"}</span>}
                                 </div>
                               </Link>
                             </motion.div>
@@ -291,9 +305,9 @@ export function InvoiceList() {
                     {pageRows.map(({ invoice, classification, finding, amountAtRisk }, i) => (
                       <MotionRow key={invoice.id} i={i} onClick={() => router.push(`/invoices/${invoice.id}`)} className="group cursor-pointer transition-colors hover:bg-primary-soft/35">
                         <td className="px-5 py-4"><Link href={`/invoices/${invoice.id}`} className="font-semibold text-ink hover:text-primary hover:underline">{invoice.vendorName}</Link><div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground"><span>{invoice.number} · {fmtDate(invoice.date)}</span>{invoice.extraction === "mock" ? <Pill tone="warn" title="Figures are a scripted demo example, not read from your file">Simulated</Pill> : invoice.source === "upload" && <Pill tone="primary">Uploaded</Pill>}</div></td>
-                        <td className="max-w-[320px] px-3 py-4"><p className="truncate text-sm text-ink">{invoice.isCredit ? "Credit note · not payable" : finding?.title ?? "Nothing flagged"}</p>{!invoice.isCredit && paymentStatusAt(invoice) === "overdue" && <p className="mt-0.5 text-xs font-medium text-bad">Past due</p>}</td>
+                        <td className="max-w-[320px] px-3 py-4"><p className="truncate text-sm text-ink">{invoice.isCredit ? "Credit note · not payable · not counted as spend" : finding?.title ?? "Nothing flagged"}</p>{!invoice.isCredit && paymentStatusAt(invoice) === "overdue" && <p className="mt-0.5 text-xs font-medium text-bad">Past due</p>}</td>
                         <td className="num px-3 py-4 text-right"><span className="font-semibold">{formatMoney(invoice.total, invoice.currency)}</span>{amountAtRisk.gt(0) && <p className="mt-0.5 text-xs font-medium text-warn">{formatMoney(amountAtRisk, invoice.currency)} possible overcharge</p>}</td>
-                        <td className="px-5 py-4"><Link href={`/invoices/${invoice.id}`} className="inline-flex items-center gap-2">{invoice.isCredit ? <Pill tone="info">Credit note</Pill> : <ClassBadge value={classification} size="sm" />}<ArrowUpRight className="size-3.5 text-subtle opacity-0 transition-opacity group-hover:opacity-100" aria-hidden /></Link></td>
+                        <td className="px-5 py-4"><Link href={`/invoices/${invoice.id}`} className="inline-flex items-center gap-2">{invoice.isCredit ? (creditPos.get(invoice.id) ? <CreditStatusPill status={creditPos.get(invoice.id)!.status} /> : <Pill tone="info">Credit note</Pill>) : isSimulated(invoice) ? <Pill tone="bad">Simulated</Pill> : <ClassBadge value={classification} size="sm" />}<ArrowUpRight className="size-3.5 text-subtle opacity-0 transition-opacity group-hover:opacity-100" aria-hidden /></Link></td>
                       </MotionRow>
                     ))}
                   </tbody>

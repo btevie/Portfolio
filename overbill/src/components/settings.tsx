@@ -8,6 +8,7 @@ import { actions, useAppState } from "@/lib/data/store";
 import type { Currency, RuleId, Sensitivity } from "@/lib/types";
 import { CURRENCIES, currencyName } from "@/lib/currencies";
 import { SelectMenu } from "@/components/ui/select-menu";
+import { EncryptedBackup } from "@/components/encrypted-backup";
 
 const CURRENCY_OPTIONS = CURRENCIES.map((c) => ({ value: c, label: `${currencyName(c)} (${c})` }));
 import { Avatar } from "@/components/avatar";
@@ -132,6 +133,7 @@ export function SettingsView() {
             <Section title="Data">
             <Card className="divide-y divide-line">
               <div className="flex flex-wrap items-center justify-between gap-3 p-4"><div><p className="text-sm font-medium">Export a copy</p><p className="text-sm text-muted-foreground">Download everything as a JSON file.</p></div><Button onClick={exportData}><Download className="size-4" aria-hidden />Export JSON</Button></div>
+              <EncryptedBackup state={s} />
               <div className="flex flex-wrap items-center justify-between gap-3 p-4"><div><p className="text-sm font-medium">Start over with the demo set</p><p className="text-sm text-muted-foreground">Restores the fictional invoices. Your preferences stay.</p></div><Button onClick={() => setConfirm("reset")}><RotateCcw className="size-4" aria-hidden />Reset demo data</Button></div>
               <div className="flex flex-wrap items-center justify-between gap-3 p-4"><div><p className="text-sm font-medium text-bad">Delete everything</p><p className="text-sm text-muted-foreground">Permanently removes all records and your profile.</p></div><Button variant="danger" onClick={() => setConfirm("clear")}><Trash2 className="size-4" aria-hidden />Delete all data</Button></div>
             </Card>

@@ -8,6 +8,28 @@ export const priceHistoryRule: Rule = (inv, ctx) => {
   if (!cmp.reliable || cmp.pctDiff === null || cmp.baseline === null || D(cmp.baseline).isZero()) return [];
   const pctDiff = D(cmp.current).minus(D(cmp.baseline)).div(D(cmp.baseline)).times(100);
   if (pctDiff.lte(0)) return []; // decreases are shown in the comparison, not flagged
+  const cap = ctx.vendor?.contract?.upliftCapPct;
+  if (cap && pctDiff.gt(D(cap))) {
+    // The user entered this limit themselves, so a breach is measured against their own contract rather than a guess about normal.
+    const m = (v: string) => formatMoney(v, inv.currency);
+    const diff = D(cmp.absDiff!);
+    const taxFactor = weightedTaxFactor(inv.lineItems.filter((line) => line.kind === "item"), inv.taxRate);
+    const allowed = D(cmp.baseline).times(D(cap).div(100).plus(1));
+    const over = D(cmp.current).minus(allowed);
+    return [makeFinding(inv, {
+      ruleId: "price_history", key: "cap",
+      classification: "LIKELY_ERROR", severity: "high",
+      title: `Increase of ${cmp.pctDiff}% is above the ${cap}% cap in your contract with ${inv.vendorName}`,
+      explanation: `The net charge is ${m(cmp.current)} against a ${cmp.baselineLabel} of ${m(cmp.baseline)} (${formatMoney(diff, inv.currency, { signed: true })}, +${cmp.pctDiff}%). You told Overbill the contract caps increases at ${cap}%, which allows up to ${m(str2(allowed))}.`,
+      expected: `${m(str2(allowed))} at most (${cap}% cap)`, actual: m(cmp.current), difference: formatMoney(over, inv.currency, { signed: true }),
+      evidence: [`Contract cap you entered: ${cap}%`, `${cmp.sampleSize} earlier invoices from this vendor`, `Change vs ${cmp.baselineLabel}: ${cmp.pctDiff}%`, `Previous: ${cmp.previous ?? "—"} · average: ${cmp.average ?? "—"}`],
+      confidence: "high",
+      confidenceReason: "The cap is a figure you entered, and the increase is measured from this vendor's own earlier invoices.",
+      uncertainty: "Check the cap really applies to this charge: it may only cover renewals, exclude added seats or usage, or have been amended since.",
+      recommendedAction: "Ask the vendor to explain the increase against the cap in your agreement, and to correct the invoice if it breaches it.",
+      amountAtRisk: str2(over.times(1 + taxFactor)),
+    })];
+  }
   const variable = ctx.vendor?.billing === "variable";
   const scale = ctx.config.sensitivityScale * (variable ? ctx.config.variableMultiplier : 1);
   const t = ctx.config.thresholds;
@@ -21,15 +43,20 @@ export const priceHistoryRule: Rule = (inv, ctx) => {
   const priorNets = priorInvoices(inv, ctx).map(netOf);
   const base = D(cmp.previous ?? cmp.baseline);
   const stable = priorNets.length >= 3 && priorNets.every((n) => n.minus(base).abs().div(base.isZero() ? 1 : base).lt(0.01));
+  const promoExpired = !variable && stable && pctDiff.gte(15);
   const confidence = !variable && stable ? "high" : !variable && cmp.sampleSize >= 3 ? "medium" : "low";
   const diff = D(cmp.absDiff!);
   const taxFactor = weightedTaxFactor(inv.lineItems.filter((line) => line.kind === "item"), inv.taxRate);
 
   return [makeFinding(inv, {
-    ruleId: "price_history", key: "increase",
+    ruleId: "price_history", key: promoExpired ? "promo-expired" : "increase",
     classification: "REVIEW_NEEDED", severity,
-    title: `Charge is ${cmp.pctDiff}% higher than your usual with ${inv.vendorName}`,
-    explanation: `The net charge is ${m(cmp.current)} against a ${cmp.baselineLabel} of ${m(cmp.baseline)} (${formatMoney(diff, inv.currency, { signed: true })}). This is an anomaly, not proof of an error. Vendors do raise prices.`,
+    title: promoExpired
+      ? `Possible expired promo or contract rollover (+${cmp.pctDiff}%) with ${inv.vendorName}`
+      : `Charge is ${cmp.pctDiff}% higher than your usual with ${inv.vendorName}`,
+    explanation: promoExpired
+      ? `After ${cmp.sampleSize} identical bills of ${m(cmp.baseline)}, ${inv.vendorName} jumped to ${m(cmp.current)} (${formatMoney(diff, inv.currency, { signed: true })}). This pattern commonly happens when an introductory discount (welkomstkorting) or fixed-rate term expires.`
+      : `The net charge is ${m(cmp.current)} against a ${cmp.baselineLabel} of ${m(cmp.baseline)} (${formatMoney(diff, inv.currency, { signed: true })}). This is an anomaly, not proof of an error. Vendors do raise prices.`,
     expected: m(cmp.baseline), actual: m(cmp.current), difference: formatMoney(diff, inv.currency, { signed: true }),
     evidence: [
       `${cmp.sampleSize} earlier invoices from this vendor`,
@@ -42,8 +69,12 @@ export const priceHistoryRule: Rule = (inv, ctx) => {
       : variable
         ? "Low confidence: this vendor bills by usage, so month-to-month swings are normal and the baseline is noisy."
         : "Medium confidence: the baseline is real but short or slightly uneven.",
-    uncertainty: "The vendor may have changed their pricing, added seats or services, or applied an indexation clause. Medium confidence at most that this is an error.",
-    recommendedAction: "Check whether you were notified of a price change or changed your plan. If not, ask the vendor to explain the increase.",
+    uncertainty: promoExpired
+      ? "The jump may reflect an expired welcome discount, a scheduled annual indexation, or an upgraded plan tier."
+      : "The vendor may have changed their pricing, added seats or services, or applied an indexation clause. Medium confidence at most that this is an error.",
+    recommendedAction: promoExpired
+      ? "If an introductory discount or fixed contract just ended, your minimum lock-in period is likely over—contact the provider for a retention discount or switch plans."
+      : "Check whether you were notified of a price change or changed your plan. If not, ask the vendor to explain the increase.",
     amountAtRisk: str2(diff.times(1 + taxFactor)),
   })];
 };

@@ -1,4 +1,19 @@
-import type { AuditFinding } from "../../types";
+import type { AuditFinding, Invoice } from "../../types";
+
+function lineTokenSet(inv: Invoice): Set<string> {
+  const words = inv.lineItems
+    .flatMap((l) => normalizeDescription(l.description).split(/\s+/))
+    .filter((w) => w.length >= 3 && !/^\d+$/.test(w));
+  return new Set(words);
+}
+
+function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  let intersection = 0;
+  for (const token of a) if (b.has(token)) intersection++;
+  const union = a.size + b.size - intersection;
+  return union === 0 ? 0 : intersection / union;
+}
 import { D, formatMoney, str2 } from "../money";
 import { DUPLICATE_COPY_WINDOW_DAYS, isDuplicateCopy, isEarlier } from "../history";
 import { daysBetween, normalizeDescription, normalizeInvoiceNumber, normalizeVendor, parseISO } from "../normalize";
@@ -85,6 +100,68 @@ export const duplicateInvoiceRule: Rule = (inv, ctx) => {
       recommendedAction: "Check what each invoice covers (service period, PO number) before paying both.",
       amountAtRisk: str2(D(inv.total)),
     }));
+    return out;
+  }
+
+  if (t !== null && D(inv.total).gt(0)) {
+    const myTokens = lineTokenSet(inv);
+    for (const o of earlier) {
+      const ot = parseISO(o.date);
+      if (ot === null) continue;
+      const gap = Math.abs(daysBetween(ot, t));
+      if (gap > 14) continue;
+
+      const sim = jaccardSimilarity(myTokens, lineTokenSet(o));
+      const ratio = D(o.total).gt(0) ? D(inv.total).minus(D(o.total)).abs().div(D(o.total)) : D(1);
+
+      if (sim >= 0.65 && ratio.lte("0.15")) {
+        out.push(makeFinding(inv, {
+          ruleId: "duplicate_invoice",
+          key: `fuzzy-${o.id}`,
+          classification: "REVIEW_NEEDED",
+          severity: "medium",
+          title: `Fuzzy near-duplicate (${Math.round(sim * 100)}% line overlap with ${o.number})`,
+          explanation: `${inv.vendorName} billed ${m(o.total)} on ${o.date} (${o.number}) and ${m(inv.total)} on ${inv.date} (${inv.number}) with ${Math.round(sim * 100)}% overlapping line-item descriptions.`,
+          expected: "Distinct line items or separate billing period",
+          actual: `${Math.round(sim * 100)}% description overlap within ${gap} day(s)`,
+          difference: m(inv.total),
+          evidence: [`Earlier: ${o.number} (${o.date}) · ${m(o.total)}`, `Current: ${inv.number} (${inv.date}) · ${m(inv.total)}`, `Keyword similarity: ${Math.round(sim * 100)}%`],
+          confidence: "medium",
+          confidenceReason: "High line-item keyword overlap within a short window often indicates re-billed or slightly adjusted duplicate work.",
+          uncertainty: "Separate deliveries or milestones with similar descriptions can legitimately occur close together.",
+          recommendedAction: "Compare the underlying deliverables or PO references for both invoices before paying.",
+          amountAtRisk: str2(D(inv.total)),
+        }));
+        break;
+      }
+
+      if (gap <= 2 && D(o.total).gt(0)) {
+        const combined = D(inv.total).plus(D(o.total));
+        const crossed500 = D(inv.total).lt(500) && D(o.total).lt(500) && combined.gte(500);
+        const crossed1000 = D(inv.total).lt(1000) && D(o.total).lt(1000) && combined.gte(1000);
+        if (crossed500 || crossed1000) {
+          const threshold = crossed1000 ? 1000 : 500;
+          out.push(makeFinding(inv, {
+            ruleId: "duplicate_invoice",
+            key: `split-${o.id}`,
+            classification: "REVIEW_NEEDED",
+            severity: "low",
+            title: `Possible split billing: two bills within ${gap} day(s) totaling ${m(str2(combined))}`,
+            explanation: `${inv.vendorName} issued two separate invoices within ${gap} day(s)—${o.number} (${m(o.total)}) and ${inv.number} (${m(inv.total)})—each below ${m(String(threshold))} but combining to ${m(str2(combined))}.`,
+            expected: "Consolidated invoice or distinct purchase orders",
+            actual: `Split across ${o.number} and ${inv.number}`,
+            difference: m(str2(combined)),
+            evidence: [`Invoice 1: ${o.number} (${o.date}) · ${m(o.total)}`, `Invoice 2: ${inv.number} (${inv.date}) · ${m(inv.total)}`, `Combined 48h total: ${m(str2(combined))}`],
+            confidence: "medium",
+            confidenceReason: "Multiple invoices just under common approval thresholds within 48 hours warrant a combined review.",
+            uncertainty: "Two separate orders or departments can legitimately generate two invoices within 48 hours.",
+            recommendedAction: "Verify that both invoices represent separate approved work rather than a single charge split into two.",
+            amountAtRisk: "0.00",
+          }));
+          break;
+        }
+      }
+    }
   }
   return out;
 };
@@ -97,7 +174,7 @@ export const duplicateLineRule: Rule = (inv) => {
     groups.set(key, [...(groups.get(key) ?? []), l]);
   }
   const out: AuditFinding[] = [];
-  for (const [key, lines] of groups) {
+  for (const lines of groups.values()) {
     if (lines.length < 2) continue;
     const extra = lines.slice(1).reduce((a, l) => a.plus(D(l.total)), D(0));
     out.push(makeFinding(inv, {

@@ -1,6 +1,6 @@
 "use client";
 import { SelectMenu } from "@/components/ui/select-menu";
-import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { ArrowRight, PiggyBank, Plus, RotateCcw } from "lucide-react";
 import { AnimatePresence, LayoutGroup, motion } from "framer-motion";
@@ -8,16 +8,17 @@ import { D, formatMoney, isValidDecimal } from "@/lib/audit/money";
 import { daysBetween, parseISO } from "@/lib/audit/normalize";
 import { pendingCreditNote, recoveryStats, today } from "@/lib/data/selectors";
 import { Textarea } from "@/components/ui/textarea";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { CaseDetail } from "@/components/recovery-case";
+import { nextAction } from "@/lib/recovery";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { actions, useAppState } from "@/lib/data/store";
-import { fmtDate, initials, STATUS_LABEL } from "@/lib/format";
+import { initials, STATUS_LABEL } from "@/lib/format";
 import type { RecoveryRecord, RecoveryStatus } from "@/lib/types";
 import { savingsReportHtml } from "@/lib/report";
 import { auditAll } from "@/lib/data/selectors";
-import { Button, Card, Disclosure, EmptyState, Field, fieldClass, Modal, PageHeader, Pill, ProgressRing, Stat } from "@/components/ui";
+import { Button, Card, Disclosure, EmptyState, Field, fieldClass, Modal, PageHeader, ProgressRing, Stat } from "@/components/ui";
 
 type Stage = Exclude<RecoveryStatus, "dismissed">;
-const STATUSES = Object.keys(STATUS_LABEL) as RecoveryStatus[];
 const EASE = [0.23, 1, 0.32, 1] as const;
 
 /** The pipeline. Colour carries meaning: amber needs you, slate is with the vendor, green is money back. */
@@ -33,9 +34,9 @@ const STAGES: { id: Stage; label: string; hint: string; bar: string; dot: string
 const NEXT: Partial<Record<RecoveryStatus, { to: RecoveryStatus; label: string }>> = {
   flagged: { to: "disputed", label: "Mark as disputed" },
   disputed: { to: "vendor_responded", label: "Vendor replied" },
-  vendor_responded: { to: "credit_issued", label: "Credit issued" },
-  credit_issued: { to: "recovered", label: "Money received" },
 };
+/** Steps that involve money are recorded in the case (with an amount and date), never moved with one click. */
+const OPEN_CASE: Partial<Record<RecoveryStatus, string>> = { vendor_responded: "Record promise or credit", credit_issued: "Record credit or refund" };
 
 const ago = (iso: string) => {
   const d = daysBetween(parseISO(iso) ?? 0, parseISO(today()) ?? 0);
@@ -66,7 +67,8 @@ export function Recovery() {
   const wide = useWide();
   const recShare = Number(stats.recovered.plus(stats.potential).gt(0) ? stats.recovered.div(stats.recovered.plus(stats.potential)).times(100) : 0);
   const [adding, setAdding] = useState(false);
-  const [openId, setOpenId] = useState<string | null>(null);
+  const sp = useSearchParams();
+  const [openId, setOpenId] = useState<string | null>(sp.get("case")); // /recovery?case=<id> opens that case (linked from the invoice finding)
   const [stage, setStage] = useState<"all" | Stage>("all");
 
   const open = state.recovery.filter((r) => r.status !== "dismissed").sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
@@ -89,7 +91,7 @@ export function Recovery() {
         {([
           ["Potential savings", Number(stats.potential), (n: number) => formatMoney(n, cur), "Claimed but not received yet. Not money in hand", undefined],
           ["Disputed", Number(stats.disputed), (n: number) => formatMoney(n, cur), "With the vendor right now", undefined],
-          ["Money received", Number(stats.recovered), (n: number) => formatMoney(n, cur), pendingCreditNote(stats, (d) => formatMoney(d, cur)) ?? "Only cases you marked as received", "ok"],
+          ["Money received", Number(stats.recovered), (n: number) => formatMoney(n, cur), (stats.recovered.gt(0) ? `${formatMoney(stats.received, cur)} refunded · ${formatMoney(stats.applied, cur)} credit applied · ` : "") + (pendingCreditNote(stats, (d) => formatMoney(d, cur)) ?? "Self-reported by you"), "ok"],
           ["Cases that paid out", stats.rate ?? 0, (n: number) => (stats.rate === null ? "—" : `${Math.round(n)}%`), (stats.resolved ? `${stats.won} of ${stats.resolved} closed cases paid out` : "No closed cases yet") + (stats.pendingCreditCount ? ` · ${stats.pendingCreditCount} credit pending, not counted` : ""), undefined],
         ] as const).map(([k, v, f, h, tone]) => <Stat key={k} label={k} value={v} format={f} hint={h} tone={tone} aside={k === "Money received" && recShare > 0 ? <ProgressRing pct={recShare} label="Share of claimed money recovered" size={44} /> : undefined} />)}
       </Card>
@@ -184,6 +186,7 @@ function Ledger({ records, cur, total }: { records: RecoveryRecord[]; cur: strin
 
 function CaseCard({ r, onOpen, showStage }: { r: RecoveryRecord; onOpen: () => void; showStage?: boolean }) {
   const next = NEXT[r.status];
+  const act = nextAction(r, today());
   return (
     <motion.li layout layoutId={r.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96 }} transition={{ type: "spring", stiffness: 420, damping: 34 }}
       className="rounded-lg border bg-card p-3 shadow-xs transition-colors hover:border-primary/40">
@@ -193,7 +196,9 @@ function CaseCard({ r, onOpen, showStage }: { r: RecoveryRecord; onOpen: () => v
       </div>
       <button type="button" onClick={onOpen} className="mt-1.5 block w-full cursor-pointer text-left text-sm leading-snug font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring">{r.title}</button>
       <p className="mt-1 flex flex-wrap items-baseline justify-between gap-x-2"><span className="num text-base font-semibold">{formatMoney(r.amount, r.currency)}</span><span className="text-xs text-muted-foreground">{showStage ? `${STATUS_LABEL[r.status]} · ` : ""}updated {ago(r.updatedAt)}</span></p>
-      {next && <Button size="sm" variant="secondary" className="mt-2.5 w-full justify-between px-3.5" onClick={() => actions.updateRecovery(r.id, { status: next.to })}>{next.label}<ArrowRight className="size-3.5" aria-hidden /></Button>}
+      {act && <p className={`mt-1.5 text-xs leading-snug ${act.tone === "bad" ? "font-medium text-bad" : "text-muted-foreground"}`}>{act.label}</p>}
+      {next && <Button size="sm" variant="secondary" className="mt-2.5 min-h-11 w-full justify-between px-3.5" onClick={() => actions.updateRecovery(r.id, { status: next.to })}>{next.label}<ArrowRight className="size-3.5" aria-hidden /></Button>}
+      {!next && OPEN_CASE[r.status] && <Button size="sm" variant="secondary" className="mt-2.5 min-h-11 w-full justify-between px-3.5" onClick={onOpen}>{OPEN_CASE[r.status]}<ArrowRight className="size-3.5" aria-hidden /></Button>}
     </motion.li>
   );
 }
@@ -207,52 +212,6 @@ function CaseSheet({ id, onClose }: { id: string | null; onClose: () => void }) 
         {r && <CaseDetail key={r.id} r={r} />}
       </SheetContent>
     </Sheet>
-  );
-}
-
-function CaseDetail({ r }: { r: RecoveryRecord }) {
-  const [draft, setDraft] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-  const notes = draft ?? r.notes;
-  const at = r.status === "dismissed" ? -1 : STAGES.findIndex((s) => s.id === r.status);
-  return (
-    <>
-      <SheetHeader className="border-b p-5 pr-12">
-        <Pill tone={r.status === "recovered" || r.status === "credit_issued" ? "ok" : r.status === "dismissed" ? "neutral" : r.status === "flagged" ? "warn" : "info"} className="w-fit">{STATUS_LABEL[r.status]}</Pill>
-        <SheetTitle className="text-base leading-snug">{r.title}</SheetTitle>
-        <SheetDescription>
-          {r.vendorId ? <Link href={`/vendors/${r.vendorId}`} className="text-primary hover:underline">{r.vendorName}</Link> : r.vendorName}
-          {r.invoiceId && <> · <Link href={`/invoices/${r.invoiceId}${r.findingId ? `?finding=${encodeURIComponent(r.findingId)}` : ""}`} className="text-primary hover:underline">View invoice</Link></>}
-        </SheetDescription>
-      </SheetHeader>
-      <div className="space-y-5 p-5">
-        <div>
-          <p className="num text-2xl font-semibold">{formatMoney(r.amount, r.currency)}</p>
-          <p className="mt-1 text-xs text-muted-foreground">Opened {fmtDate(r.createdAt)} · updated {fmtDate(r.updatedAt)}</p>
-        </div>
-        <ol aria-label="Progress" className="flex gap-1">
-          {STAGES.map((s, n) => (
-            <li key={s.id} className="min-w-0 flex-1">
-              <div className="h-1.5 overflow-hidden rounded-full bg-muted"><motion.div className="h-full origin-left rounded-full bg-primary" initial={{ scaleX: 0 }} animate={{ scaleX: n <= at ? 1 : 0 }} transition={{ duration: 0.5, delay: n * 0.07, ease: EASE }} /></div>
-              <p className={`mt-1 truncate text-xs ${n === at ? "font-semibold text-foreground" : "text-muted-foreground"}`}>{s.label}{n === at && <span className="sr-only"> (current)</span>}</p>
-            </li>
-          ))}
-        </ol>
-        <Field label="Status" htmlFor={`status-${r.id}`}>
-          <SelectMenu id={`status-${r.id}`} label="Status" value={r.status} onChange={(v) => actions.updateRecovery(r.id, { status: v as RecoveryStatus })} options={STATUSES.map((s) => ({ value: s, label: STATUS_LABEL[s] }))} />
-        </Field>
-        <div>
-          <label htmlFor={`notes-${r.id}`} className="mb-1.5 block text-sm font-medium">Notes</label>
-          <Textarea id={`notes-${r.id}`} rows={5} value={notes} placeholder="Who you contacted, what they said…"
-            onChange={(e) => { setDraft(e.target.value); setSaved(false); }}
-            onBlur={() => { if (draft !== null && draft !== r.notes) { actions.updateRecovery(r.id, { notes: draft }); setSaved(true); } setDraft(null); }} />
-          <p role="status" className="mt-1 h-4 text-xs text-ok">{saved ? "Notes saved" : ""}</p>
-        </div>
-        {r.status !== "dismissed" && r.status !== "recovered" && (
-          <Button onClick={() => actions.updateRecovery(r.id, { status: "dismissed" })}>It was fine, dismiss</Button>
-        )}
-      </div>
-    </>
   );
 }
 

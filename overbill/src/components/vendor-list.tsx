@@ -8,7 +8,7 @@ import { D, formatMoney } from "@/lib/audit/money";
 import { useVendorStats } from "@/lib/data/hooks";
 import { fmtDate, initials } from "@/lib/format";
 import { cn } from "@/lib/cn";
-import { Card, EmptyState, fieldClass, MotionRow, PageHeader, Pill, PillTabs, Delta } from "@/components/ui";
+import { Card, EmptyState, fieldClass, MotionRow, PageHeader, Pill, Delta } from "@/components/ui";
 import { Sparkline } from "@/components/charts";
 import type { VendorStats } from "@/lib/data/selectors";
 
@@ -26,6 +26,10 @@ export function VendorList() {
   const view = sp.get("view") === "table" ? "table" : "grid";
   const setView = (v: "grid" | "table") => set("view", v === "grid" ? "" : v);
   const count = (s: string) => stats.filter((x) => x.status === s).length;
+  const summary = [
+    { value: "all", label: "All vendors", count: stats.length },
+    ...STATUSES.map((s) => ({ value: s, label: s, count: count(s) })),
+  ];
   const categories = useMemo(() => [...new Set(state.vendors.map((v) => v.category))].sort(), [state.vendors]);
 
   const rows = useMemo(() => {
@@ -38,8 +42,19 @@ export function VendorList() {
   return (
     <>
       <PageHeader title="Vendors" description="Each supplier and what they usually charge. Open one to see price history and anything flagged." />
+      <div role="group" aria-label="Filter by vendor status" className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
+        {summary.map((item) => {
+          const active = status === item.value;
+          return (
+            <button key={item.value} type="button" aria-pressed={active} onClick={() => set("status", item.value)}
+              className={cn("flex min-h-16 items-center justify-between gap-2 rounded-xl border px-3 py-2.5 text-left outline-none transition-colors hover:border-primary/40 focus-visible:ring-2 focus-visible:ring-ring", active ? "border-primary/50 bg-primary/5" : "border-line bg-card")}>
+              <span className="text-xs leading-snug font-medium text-muted-foreground">{item.label}</span>
+              <span className={cn("num text-xl font-semibold", active ? "text-primary" : "text-foreground")}>{item.count}</span>
+            </button>
+          );
+        })}
+      </div>
       <Card className="max-sm:rounded-none max-sm:border-0 max-sm:bg-transparent max-sm:shadow-none max-sm:ring-0">
-        <div className="border-b px-4 pt-4 max-sm:border-0 max-sm:px-0 max-sm:pt-0"><PillTabs id="ven" label="Filter by status" value={status} onChange={(v) => set("status", v)} items={[{ value: "all", label: "All vendors", count: stats.length }, ...STATUSES.map((s) => ({ value: s, label: s, count: count(s) }))]} /></div>
         <div className="grid grid-cols-2 gap-3 border-b border-line bg-canvas/50 p-4 max-sm:border-0 max-sm:bg-transparent max-sm:px-0 max-sm:pt-1 sm:flex sm:flex-wrap">
           <div className="relative col-span-2 min-w-52 flex-1">
             <Search className="pointer-events-none absolute top-3 left-3 size-4 text-subtle" aria-hidden />
