@@ -14,6 +14,8 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Tool output / scratch directories, not project source.
     "public/pdf.worker.min.mjs", // vendored, minified pdf.js worker
+    "public/ocr/**", // vendored tesseract bundles
+    "public/sw.js",
     ".playwright-mcp/**",
     ".21st/**",
     ".claude/**",

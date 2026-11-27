@@ -3,21 +3,15 @@ import Link from "next/link";
 import { useMemo, useSyncExternalStore } from "react";
 import { GET_STARTED_EVENT, getStartedVisible, hideGetStarted } from "@/lib/get-started";
 import { ArrowRight, Check, Download, CheckCircle2, Circle, Inbox, Upload, X } from "lucide-react";
-import { initials } from "@/lib/format";
 import { D, formatMoney } from "@/lib/audit/money";
-import { daysBetween, parseISO } from "@/lib/audit/normalize";
 import { useVendorStats } from "@/lib/data/hooks";
-import { actionQueue, dashboardMetrics, paymentStatusAt, pendingCreditNote, stakeByVendor, today } from "@/lib/data/selectors";
+import { actionQueue, dashboardMetrics, nextActions, paymentStatusAt, pendingCreditNote, stakeByVendor, type NextAction } from "@/lib/data/selectors";
 import { useBackupAge } from "@/lib/backup";
 import { ChartCard } from "@/components/charts/kpi-charts";
 import { SpendCard } from "@/components/spend-card";
+import { creditBalanceByCurrency, creditsToResolve, formatBalances } from "@/lib/credits";
 import { Card, Disclosure, EmptyState, LinkButton, PageHeader } from "@/components/ui";
 
-function dueLabel(due: string, paid: boolean) {
-  if (paid) return "Paid";
-  const d = daysBetween(parseISO(today()) ?? 0, parseISO(due) ?? 0);
-  return d < 0 ? `Overdue by ${-d} day${d === -1 ? "" : "s"}` : d === 0 ? "Due today" : `Due in ${d} day${d === 1 ? "" : "s"}`;
-}
 
 function GetStarted({ steps }: { steps: { label: string; done: boolean; href: string }[] }) {
   const visible = useSyncExternalStore(
@@ -42,6 +36,83 @@ function GetStarted({ steps }: { steps: { label: string; done: boolean; href: st
   );
 }
 
+const URGENCY = {
+  overdue: { label: "Overdue", cls: "bg-bad-bg text-bad ring-bad-line" },
+  soon: { label: "Due soon", cls: "bg-warn-bg text-warn ring-warn-line" },
+  later: { label: "Not due yet", cls: "bg-muted text-muted-foreground ring-line" },
+  paid: { label: "Already paid", cls: "bg-muted text-muted-foreground ring-line" },
+} as const;
+
+function whenText(a: NextAction) {
+  if (a.days === null) return "No due date";
+  if (a.kind === "followup") return a.dated ? `Follow-up ${a.days} day${a.days === 1 ? "" : "s"} overdue` : `Quiet for ${a.days} days`;
+  if (a.urgency === "paid") return "Paid";
+  return a.days < 0 ? `${-a.days} day${a.days === -1 ? "" : "s"} overdue` : a.days === 0 ? "Due today" : `Due in ${a.days} day${a.days === 1 ? "" : "s"}`;
+}
+
+/** Each invoice appears once (findings rolled up). Amounts are possible, not confirmed, and shown per currency. */
+function NextActions({ actions }: { actions: NextAction[] }) {
+  if (actions.length === 0) {
+    return (
+      <section aria-labelledby="attn-h" className="grid gap-3">
+        <h2 id="attn-h" className="text-sm font-semibold tracking-[-0.01em]">Start here: what to do next</h2>
+        <div className="flex items-center gap-2 rounded-lg bg-ok-bg px-3 py-2 text-ok ring-1 ring-ok-line"><CheckCircle2 className="size-4 shrink-0" aria-hidden /><p className="text-sm font-medium">Nothing flagged and no follow-ups waiting. Our checks are not a guarantee, so keep reading invoices before you pay.</p></div>
+      </section>
+    );
+  }
+  const [lead, ...rest] = actions;
+  const more = rest.slice(0, 4);
+  const amountOf = (a: NextAction) => (a.amount ? formatMoney(a.amount.value, a.amount.currency) : null);
+  return (
+    <section aria-labelledby="attn-h" className="grid gap-3" data-testid="next-actions">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 id="attn-h" className="text-sm font-semibold tracking-[-0.01em]">Start here: what to do next</h2>
+        <span className="text-xs text-muted-foreground">{actions.length} to look at</span>
+      </div>
+      <div className="grid gap-3 lg:grid-cols-[1.15fr_1fr]">
+        <article className="flex flex-col gap-3 self-start rounded-2xl bg-card p-4 ring-1 ring-line sm:gap-4 sm:p-6">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ${URGENCY[lead.urgency].cls}`}>{URGENCY[lead.urgency].label}</span>
+            <span className="text-xs text-muted-foreground">{whenText(lead)}</span>
+          </div>
+          <div>
+            <h3 className="text-base leading-snug font-semibold tracking-tight sm:text-xl">{lead.vendorName}</h3>
+            <p className="mt-0.5 text-sm text-muted-foreground"><span className="font-medium text-ink">Why it matters:</span> {lead.reason}</p>
+          </div>
+          {amountOf(lead) && (
+            <div>
+              <p className="text-xs font-medium text-warn">{lead.kind === "followup" ? "Amount in dispute (not yet received)" : "Possible overcharge, not confirmed"}</p>
+              <p className="num mt-0.5 text-xl leading-none font-semibold">{amountOf(lead)}</p>
+            </div>
+          )}
+          <LinkButton href={lead.href} variant="primary" className="w-full sm:w-fit">{lead.cta}<ArrowRight className="size-4" aria-hidden /></LinkButton>
+        </article>
+
+        <div className="rounded-2xl bg-card p-3 ring-1 ring-line sm:p-4">
+          <div className="flex items-center justify-between rounded-xl bg-muted/70 px-3 py-2 text-xs text-muted-foreground"><span>Up next</span><Link href="/pay-run" className="font-medium text-primary">Open pay run</Link></div>
+          {more.length === 0 ? <p className="px-3 py-4 text-sm text-muted-foreground">That&apos;s the only item right now.</p> : (
+            <ol className="mt-1">
+              {more.map((a) => (
+                <li key={a.id}>
+                  <Link href={a.href} className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-xl px-2 py-3 transition-colors active:bg-muted/60 sm:hover:bg-muted/60">
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-medium">{a.vendorName}</span>
+                      <span className="block truncate text-xs text-muted-foreground">{a.reason}</span>
+                      <span className="mt-1 flex flex-wrap gap-x-2 text-xs"><span className={a.urgency === "overdue" ? "font-medium text-bad" : "text-muted-foreground"}>{URGENCY[a.urgency].label}</span><span className="text-muted-foreground">{whenText(a)}</span></span>
+                    </span>
+                    <span className="num text-right text-sm font-semibold">{amountOf(a) ?? "—"}</span>
+                  </Link>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground">Amounts are possible, not confirmed. Each currency is shown on its own and never added together.</p>
+    </section>
+  );
+}
+
 export function Dashboard() {
   const { state, audits, stats } = useVendorStats();
   const m = useMemo(() => dashboardMetrics(state, audits, 6), [state, audits]);
@@ -51,9 +122,9 @@ export function Dashboard() {
   const stakeText = m.atStake.map((t) => formatMoney(t.amount, t.currency)).join(" · "); // per currency, never summed
   const whole = (v: number) => new Intl.NumberFormat("en-IE", { style: "currency", currency: cur, maximumFractionDigits: 0 }).format(v);
 
+  const creditsToDo = useMemo(() => creditsToResolve(state), [state]);
   const queue = useMemo(() => actionQueue(state, audits), [state, audits]);
-  const lead = queue[0];
-  const next = queue.slice(1, 4);
+  const actions = useMemo(() => nextActions(state, audits), [state, audits]);
   const vendors = useMemo(() => stakeByVendor(queue, cur), [queue, cur]);
   const vendorTotal = vendors.reduce((a, v) => a.plus(v.amount), D(0));
 
@@ -72,6 +143,7 @@ export function Dashboard() {
   }
 
   const rs = m.recoveryStats;
+  const otherCurrencyCases = state.recovery.filter((r) => r.currency !== cur && r.status !== "dismissed").length;
 
   return (
     <div className="grid w-full min-w-0 gap-4 sm:gap-4">
@@ -91,57 +163,29 @@ export function Dashboard() {
         </Link>
       )}
 
+      {creditsToDo.length > 0 && (
+        <section aria-label="Credit notes to resolve" className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border bg-card px-4 py-3 text-sm">
+          <p><strong>{creditsToDo.length} credit note{creditsToDo.length === 1 ? "" : "s"} to resolve.</strong> <span className="text-muted-foreground">{formatBalances(creditBalanceByCurrency(creditsToDo))} not yet confirmed applied or refunded. Not counted in spending.</span></p>
+          <Link href="/invoices?status=credits" className="inline-flex min-h-11 items-center font-medium text-primary hover:underline">Review credit notes</Link>
+        </section>
+      )}
+
       <GetStarted steps={[
         { label: "Check one of your own invoices", done: state.invoices.some((i) => i.source === "upload" && !i.isCredit), href: "/invoices/new" },
         { label: "Review a finding", done: Object.keys(state.decisions).length > 0, href: "/invoices?status=attention" },
         { label: "Draft a dispute note", done: state.recovery.some((r) => r.notes?.includes("Note drafted in Overbill")), href: "/invoices?status=attention" },
       ]} />
 
-      {/* 1 · Needs attention */}
-      <section aria-labelledby="attn-h" className="grid gap-3">
-        <h2 id="attn-h" className="text-sm font-semibold tracking-[-0.01em]">Start here: what to review next</h2>
-        {!lead ? (
-          <div className="flex items-center gap-2 rounded-lg bg-ok-bg px-3 py-2 text-ok ring-1 ring-ok-line"><CheckCircle2 className="size-4 shrink-0" aria-hidden /><p className="text-sm font-medium">Nothing flagged right now. Our checks can miss things, so keep an eye on new invoices.</p></div>
-        ) : (
-          <div className="grid gap-3 lg:grid-cols-[1.15fr_1fr]">
-            <article className={`flex flex-col gap-3 self-start rounded-2xl p-4 ring-1 sm:gap-4 sm:p-6 ${lead.finding.classification === "LIKELY_ERROR" ? "border-bad-line bg-bad-bg text-bad ring-bad-line" : "border-line bg-card ring-line"}`}>
-              <div>
-                <h3 className="text-base leading-snug font-semibold tracking-tight sm:text-xl">{lead.invoice.vendorName}</h3>
-                <p className="mt-0.5 text-sm text-muted-foreground">{lead.finding.title}</p>
-              </div>
-              <div className="flex items-end justify-between gap-3">
-                <div><p className={`text-xs font-medium ${lead.finding.classification === "LIKELY_ERROR" ? "text-bad" : "text-warn"}`}>Possible overcharge (not confirmed)</p><p className={`num mt-0.5 text-xl leading-none font-semibold tracking-tight sm:text-3xl ${lead.finding.classification === "LIKELY_ERROR" ? "text-bad" : "text-warn"}`}>{D(lead.finding.amountAtRisk).gt(0) ? formatMoney(lead.finding.amountAtRisk, lead.invoice.currency) : "—"}</p></div>
-                <p className={`text-sm font-medium ${paymentStatusAt(lead.invoice) === "overdue" ? "text-bad" : "text-muted-foreground"}`}>{dueLabel(lead.invoice.dueDate, paymentStatusAt(lead.invoice) === "paid")}</p>
-              </div>
-              <LinkButton href={`/invoices/${lead.invoice.id}?finding=${encodeURIComponent(lead.finding.id)}`} variant="primary" className="w-full sm:w-fit">Review invoice<ArrowRight className="size-4" aria-hidden /></LinkButton>
-            </article>
+      {/* 1 · One ranked list: what to review, why, how urgent, where to go */}
+      <NextActions actions={actions} />
 
-                        <div className="rounded-2xl bg-card p-3 ring-1 ring-line sm:p-4">
-              <div className="flex items-center justify-between rounded-xl bg-muted/70 px-3 py-2 text-xs text-muted-foreground"><span>Up next</span><Link href="/invoices?status=attention" className="font-medium text-primary">See all {m.needsReview.length}</Link></div>
-              {next.length === 0 ? <p className="px-3 py-4 text-sm text-muted-foreground">That&apos;s the only open finding.</p> : (
-                <ol className="mt-1">
-                  {next.map(({ finding: f, invoice: inv }) => (
-                    <li key={f.id}>
-                      <Link href={`/invoices/${inv.id}?finding=${encodeURIComponent(f.id)}`} className="grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-xl px-2 py-3 transition-colors active:bg-muted/60 sm:hover:bg-muted/50">
-                        <span aria-hidden className="grid size-10 place-items-center rounded-full bg-accent text-sm font-semibold text-accent-foreground">{initials(inv.vendorName)}</span>
-                        <span className="min-w-0"><span className="block truncate text-sm font-medium">{inv.vendorName}</span><span className="block truncate text-xs text-muted-foreground">{f.title}</span></span>
-                        <span className="num text-sm font-semibold">{D(f.amountAtRisk).gt(0) ? formatMoney(f.amountAtRisk, inv.currency) : "—"}</span>
-                      </Link>
-                    </li>
-                  ))}
-                </ol>
-              )}
-            </div>
-          </div>
-        )}
-      </section>
 
       {/* 2 · Figure cards: one bold, the rest soft */}
       {/* 2 · Key figures: one ruled strip, not a card grid */}
       <section aria-label="Key figures" className="grid grid-cols-2 divide-x divide-line overflow-hidden rounded-2xl bg-card ring-1 ring-line sm:grid-cols-3">
         {([
           ["Possible overcharges", m.atStake[0] ? formatMoney(m.atStake[0].amount, m.atStake[0].currency) : formatMoney(0, cur), "/invoices?status=attention", "text-warn", m.atStake.length > 1 ? `Also ${m.atStake.slice(1).map((t) => formatMoney(t.amount, t.currency)).join(" · ")}` : "Possible, not confirmed. You decide on each invoice."],
-          ["Money received back", formatMoney(m.recovered, cur), "/recovery", "text-ok", pendingCreditNote(rs, (d) => formatMoney(d, cur)) ?? "Only what you marked as received"],
+          ["Received or credited", formatMoney(m.recovered, cur), "/recovery", "text-ok", pendingCreditNote(rs, (d) => formatMoney(d, cur)) ?? (otherCurrencyCases ? `Only ${cur}. ${otherCurrencyCases} case${otherCurrencyCases === 1 ? "" : "s"} in other currencies are on the Recovery page.` : "Only what you marked as received or applied")],
           ["Past due", String(state.invoices.filter((i) => !i.isCredit && paymentStatusAt(i) === "overdue").length), "/invoices", "", null],
         ] as const).map(([label, value, href, tone, note]) => (
           <Link key={label} href={href} className={`${label === "Past due" ? "max-sm:hidden " : ""}block px-4 py-3 outline-none transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring`}>

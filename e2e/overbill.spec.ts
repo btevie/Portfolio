@@ -688,3 +688,105 @@ test("/demo asks before replacing data the person created", async ({ page }) => 
   await page.goto("/invoices");
   await expect(page.getByText("35", { exact: true }).first()).toBeVisible();
 });
+
+test("recovery case timeline: contact, reply, promise, credit applied and refund received stay distinct", async ({ page }) => {
+  await page.goto("/recovery");
+  await page.getByRole("button", { name: "Duplicate November invoice OW-2211" }).click();
+  const sheet = page.getByRole("dialog");
+  await expect(sheet.getByRole("region", { name: "Amounts" })).toContainText("Nothing yet");
+  await expect(sheet.getByRole("region", { name: "Next action" })).toBeVisible();
+
+  const record = async (kind: string, fields: Record<string, string>) => {
+    await sheet.getByRole("button", { name: kind }).click();
+    for (const [label, value] of Object.entries(fields)) await sheet.getByLabel(label).fill(value);
+    await sheet.getByRole("button", { name: "Save to timeline" }).click();
+  };
+  await record("I contacted them", { "How and what you asked (optional)": "Emailed billing" });
+  await record("They replied", { "What the vendor said": "We will credit you" });
+  await record("They promised money", { "Amount (EUR): total the vendor agreed to": "100" });
+  await expect(sheet.getByRole("region", { name: "Amounts" })).toContainText("€100.00");
+  await record("Credit applied", { "Amount (EUR)": "40" });
+  const amounts = sheet.getByRole("region", { name: "Amounts" });
+  await expect(amounts).toContainText("Still to come: €60.00");
+  await expect(amounts.locator("div", { hasText: "Credit applied" }).first()).toContainText("€40.00");
+  await record("Money received", { "Amount (EUR)": "60" });
+  await expect(sheet.getByRole("button", { name: "Status" })).toContainText("Recovered");
+  const timeline = sheet.getByRole("region", { name: "Timeline" });
+  for (const t of ["You contacted the vendor", "Vendor replied", "Vendor promised a refund or credit", "Credit applied to your account", "Money received"]) await expect(timeline).toContainText(t);
+  await page.reload();
+  await page.getByRole("button", { name: "Duplicate November invoice OW-2211" }).click();
+  await expect(page.getByRole("dialog").getByRole("region", { name: "Timeline" })).toContainText("Money received");
+});
+
+test("a finding can only have one recovery case, and the invoice links to it", async ({ page }) => {
+  await page.goto("/invoices/inv-orbit-resend");
+  await expect(page.getByRole("link", { name: /Open case/ }).first()).toBeVisible();
+  await page.getByRole("link", { name: /Open case/ }).first().click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("button", { name: "Duplicate November invoice OW-2211" })).toHaveCount(1);
+});
+
+test("the case timeline fits a phone without sideways scrolling", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 700 });
+  await page.goto("/recovery");
+  await page.getByRole("button", { name: "Duplicate November invoice OW-2211" }).click();
+  const sheet = page.getByRole("dialog");
+  await sheet.getByRole("button", { name: "They promised money" }).click();
+  const overflow = await sheet.evaluate((el) => el.scrollWidth > el.clientWidth + 1);
+  expect(overflow).toBe(false);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+});
+
+test("a credit note is matched to a bill, only counts once the user confirms it, and stays out of spend", async ({ page }) => {
+  await page.goto("/dashboard");
+  const figures = async () => ((await page.getByRole("region", { name: "Key figures" }).textContent()) ?? "").replace(/\s+/g, " ").trim();
+  const spendBefore = await figures();
+
+  // Add a credit note by pasting its text.
+  await page.goto("/invoices/new");
+  await page.getByRole("tab", { name: "Paste text" }).click();
+  await page.getByLabel("Paste invoice text").fill("Document type: Credit note\nVendor: Brightline Telecom\nInvoice #: CN-9001\nInvoice date: 2026-11-20\nDue date: 2026-11-20\nCurrency: EUR\nTax rate: 21%\nCredit for network fee | 1 | 7.50 | 7.50\nSubtotal: 7.50\nTax: 1.58\nTotal: 9.08");
+  await page.getByRole("button", { name: "Check pasted invoice" }).click();
+  await page.getByRole("link", { name: /See what we found|Open invoice/ }).click();
+
+  // It starts unmatched, with the full amount unaccounted for: issued is not received.
+  await expect(page.getByRole("heading", { name: "Where this credit stands" })).toBeVisible();
+  await expect(page.getByText("Not matched to a bill").first()).toBeVisible();
+  await expect(page.getByText("A credit note being issued does not mean you got the money")).toBeVisible();
+
+  // It appears in the credit notes list and on the dashboard as something to resolve.
+  await page.goto("/dashboard");
+  await expect(page.getByRole("region", { name: "Credit notes to resolve" })).toContainText("1 credit note to resolve");
+  expect(await figures()).toBe(spendBefore); // not counted in the figures
+  await page.getByRole("link", { name: "Review credit notes" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "1 credit note needs you" })).toBeVisible();
+  await page.getByRole("link", { name: /Brightline Telecom/ }).first().click();
+
+  // Link it to a bill: this only records the relationship.
+  await page.getByRole("button", { name: "Link to this bill" }).click();
+  await expect(page.getByRole("button", { name: "Unlink" })).toBeVisible();
+  await expect(page.getByText("Waiting: not confirmed applied or refunded").first()).toBeVisible();
+
+  // Settling needs the explicit confirmation and evidence.
+  await page.getByText("Refunded to me").click();
+  const record = page.getByRole("button", { name: /Record confirmed refund/ });
+  await expect(record).toBeDisabled();
+  await page.getByLabel(/I checked my statement/).check();
+  await page.getByLabel("Amount (EUR)").fill("5.00");
+  await record.click();
+  await expect(page.getByRole("alert").filter({ hasText: "evidence" })).toBeVisible(); // no reference yet
+  await page.getByLabel("Evidence reference").fill("RF-2026-11");
+  await record.click();
+  await expect(page.getByText("Partly settled").first()).toBeVisible();
+  await expect(page.getByText("€4.08").first()).toBeVisible(); // still unaccounted for
+  await expect(page.getByText("Evidence: RF-2026-11")).toBeVisible();
+
+  // A mistake is reversed, not erased.
+  await page.getByRole("button", { name: /Entered by mistake/ }).click();
+  await page.getByLabel("Why are you reversing this?").fill("Wrong amount");
+  await page.getByRole("button", { name: "Reverse this entry" }).click();
+  await expect(page.getByText("Reversed: Wrong amount")).toBeVisible();
+  await expect(page.getByText("Evidence: RF-2026-11")).toBeVisible(); // original still in the history
+  await expect(page.getByText("Waiting: not confirmed applied or refunded").first()).toBeVisible();
+});

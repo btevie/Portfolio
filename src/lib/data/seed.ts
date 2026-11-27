@@ -138,6 +138,7 @@ export function createSeedState(): AppState {
     invoices: structuredClone(invoices),
     contractRates: structuredClone(contractRates),
     recovery: structuredClone(recovery),
+    credits: [],
     decisions: {},
     settings: {
       currency: "EUR", sensitivity: "balanced",

@@ -1,3 +1,5 @@
+import { caseFigures, nextAction as caseNextAction } from "../recovery";
+import { isSimulated } from "../evidence";
 import { auditInvoice, configFromSettings, RULES } from "../audit/engine";
 import { D, Decimal, pct, sum } from "../audit/money";
 import { isDuplicateCopy, netOf } from "../audit/history";
@@ -24,7 +26,7 @@ export function auditAll(state: AppState): Audits {
   const config = configFromSettings(state.settings);
   const asOf = today();
   const out: Audits = {};
-  const bills = state.invoices.filter((i) => !i.isCredit); // credit notes are tracked, not audited, and are not price history
+  const bills = state.invoices.filter((i) => !i.isCredit && !isSimulated(i)); // credit notes are tracked, not audited, and are not price history; simulated invoices are invented, so they are never evidence about real ones
   for (const inv of state.invoices) {
     out[inv.id] = auditInvoice(inv, {
       today: asOf, invoices: bills, contractRates: state.contractRates,
@@ -79,7 +81,7 @@ export function dashboardMetrics(state: AppState, audits: Audits, monthCount = 6
   const excluded = stake.totals.filter((t) => t.currency !== currency).reduce((n, t) => n + t.invoices, 0);
   const rec = recoveryStats(state.recovery, currency);
   const needsReview = state.invoices
-    .filter((i) => !i.isCredit && effectiveClassification(state, audits[i.id]) !== "CLEAR")
+    .filter((i) => !i.isCredit && !isSimulated(i) && effectiveClassification(state, audits[i.id]) !== "CLEAR")
     .sort(invoiceSort);
 
   // last N (default 6) calendar months ending at the latest invoice month
@@ -134,7 +136,7 @@ export interface VendorStats {
 
 export function vendorStats(state: AppState, audits: Audits): VendorStats[] {
   return state.vendors.map((vendor) => {
-    const all = state.invoices.filter((i) => i.vendorId === vendor.id && !i.isCredit);
+    const all = state.invoices.filter((i) => i.vendorId === vendor.id && !i.isCredit && !isSimulated(i));
     const copyGroups = new Map<string, Invoice[]>();
     for (const i of [...all].sort((a, b) => (parseISO(a.date) ?? 0) - (parseISO(b.date) ?? 0) || a.createdAt - b.createdAt || a.id.localeCompare(b.id))) {
       const number = normalizeInvoiceNumber(i.number);
@@ -192,6 +194,11 @@ export interface RecoveryStats {
   disputed: Decimal;
   /** Money actually received: refunds paid and credits applied (status "recovered"). */
   recovered: Decimal;
+  /** Of `recovered`: refund money the user reports as received, and credit the user reports as applied. Both are self-reported. */
+  received: Decimal;
+  applied: Decimal;
+  /** Promised by the vendor and not yet applied or received. */
+  promisedOutstanding: Decimal;
   /** Credits the vendor has issued that haven't been applied/received yet (status "credit_issued"). */
   pendingCredit: Decimal;
   pendingCreditCount: number;
@@ -204,15 +211,21 @@ export interface RecoveryStats {
 /** Single source of truth for recovery figures. The dashboard and the tracker must both use this. */
 export function recoveryStats(records: RecoveryRecord[], currency: Currency): RecoveryStats {
   const mine = records.filter((r) => r.currency === currency);
-  const amt = (st: string[]) => sum(mine.filter((r) => st.includes(r.status)).map((r) => D(r.amount)));
+  const figs = mine.map((r) => ({ r, f: caseFigures(r) }));
+  const OPEN = ["flagged", "disputed", "vendor_responded", "credit_issued"];
+  // Open cases count only what has not arrived yet; whatever arrived (applied credit or refund) moves to "recovered".
+  const left = (st: string[]) => sum(figs.filter(({ r }) => st.includes(r.status)).map(({ f }) => Decimal.max(f.claimed.minus(f.resolved), 0)));
   const won = mine.filter((r) => r.status === "recovered").length;
   const resolved = won + mine.filter((r) => r.status === "dismissed").length;
   return {
-    potential: amt(["flagged", "disputed", "vendor_responded", "credit_issued"]),
-    disputed: amt(["disputed", "vendor_responded"]),
-    recovered: amt(["recovered"]),
-    pendingCredit: amt(["credit_issued"]),
-    pendingCreditCount: mine.filter((r) => r.status === "credit_issued").length,
+    potential: left(OPEN),
+    disputed: left(["disputed", "vendor_responded"]),
+    recovered: sum(figs.map(({ f }) => f.resolved)),
+    received: sum(figs.map(({ f }) => f.received)),
+    applied: sum(figs.map(({ f }) => f.applied)),
+    promisedOutstanding: sum(figs.filter(({ r }) => r.status === "credit_issued").map(({ f }) => f.outstanding)),
+    pendingCredit: sum(figs.filter(({ r }) => r.status === "credit_issued").map(({ f }) => f.outstanding)),
+    pendingCreditCount: figs.filter(({ r, f }) => r.status === "credit_issued" && f.outstanding.gt(0)).length,
     rate: resolved ? Math.round((won / resolved) * 100) : null,
     resolved, won,
   };
@@ -230,12 +243,95 @@ export function actionQueue(state: AppState, audits: Audits): QueueItem[] {
   const byId = new Map(state.invoices.map((i) => [i.id, i]));
   const sev = { high: 0, medium: 1, low: 2 } as const;
   return Object.values(audits).flatMap((a) => a.findings).filter((f) => isOpen(state, f))
-    .flatMap((finding) => { const invoice = byId.get(finding.invoiceId); return invoice ? [{ finding, invoice }] : []; })
+    .flatMap((finding) => { const invoice = byId.get(finding.invoiceId); return invoice && !isSimulated(invoice) ? [{ finding, invoice }] : []; })
     .sort((a, b) =>
       Number(paymentStatusAt(a.invoice) === "paid") - Number(paymentStatusAt(b.invoice) === "paid")
       || sev[a.finding.severity] - sev[b.finding.severity]
       || a.invoice.dueDate.localeCompare(b.invoice.dueDate)
       || D(b.finding.amountAtRisk).comparedTo(D(a.finding.amountAtRisk)));
+}
+
+export type Urgency = "overdue" | "soon" | "later" | "paid";
+export interface NextAction {
+  id: string;
+  kind: "invoice" | "followup";
+  urgency: Urgency;
+  severity: "high" | "medium" | "low";
+  vendorName: string;
+  /** Why it matters, in plain words. */
+  reason: string;
+  /** Possible (not confirmed) amount, always in its own currency. Null when no amount is evidenced. */
+  amount: { value: string; currency: Currency } | null;
+  /** Days until due (negative = overdue) for invoices, days since last update for follow-ups. */
+  days: number | null;
+  /** Follow-ups: true when `days` counts days past a date the user set, false when it counts days of silence. */
+  dated?: boolean;
+  findings: number;
+  href: string;
+  cta: string;
+}
+
+const DAY = 86_400_000;
+const SEV = { high: 0, medium: 1, low: 2 } as const;
+const TIER = { overdue: 0, soon: 1, later: 2, paid: 3 } as const;
+
+/**
+ * One ranked list for the dashboard: one row per invoice (its open findings are rolled up, never listed twice) plus
+ * disputes that have gone quiet. Unpaid and overdue come first, then severity, then the larger amount, but amounts are
+ * only compared inside one currency, so nothing is ever converted or added across currencies.
+ */
+export function nextActions(state: AppState, audits: Audits, now = Date.now()): NextAction[] {
+  const out: NextAction[] = [];
+  const soonDays = state.settings.reminders.dueWithinDays;
+  const todayMs = parseISO(today()) ?? 0;
+  for (const inv of state.invoices) {
+    if (inv.isCredit) continue;
+    const open = (audits[inv.id]?.findings ?? []).filter((f) => isOpen(state, f));
+    if (!open.length) continue;
+    const status = paymentStatusAt(inv);
+    // Already paid and every open finding has its own case: the case carries the next step, so the invoice would be a second queue entry.
+    if (status === "paid" && open.every((f) => state.recovery.some((r) => r.findingId === f.id && r.status !== "dismissed"))) continue;
+    const dueMs = parseISO(inv.dueDate);
+    const days = dueMs === null ? null : Math.round((dueMs - todayMs) / DAY);
+    const urgency: Urgency = status === "paid" ? "paid" : status === "overdue" || (days !== null && days < 0) ? "overdue" : days !== null && days <= soonDays ? "soon" : "later";
+    const severity = open.reduce<"high" | "medium" | "low">((m, f) => (SEV[f.severity] < SEV[m] ? f.severity : m), "low");
+    const exposure = invoiceExposure(open, inv.total);
+    const top = [...open].sort((a, b) => SEV[a.severity] - SEV[b.severity])[0];
+    const more = open.length > 1 ? ` and ${open.length - 1} more` : "";
+    out.push({
+      id: `inv:${inv.id}`, kind: "invoice", urgency, severity, vendorName: inv.vendorName,
+      reason: `${top.title}${more}`,
+      amount: exposure.gt(0) ? { value: exposure.toFixed(2), currency: inv.currency } : null,
+      days, findings: open.length,
+      href: `/invoices/${inv.id}?finding=${encodeURIComponent(top.id)}`,
+      cta: urgency === "paid" ? "Review and ask for a refund" : "Review before paying",
+    });
+  }
+  const replyAfter = state.settings.reminders.replyAfterDays;
+  for (const c of state.recovery) {
+    if (c.status === "dismissed" || c.status === "recovered") continue;
+    const href = `/recovery?case=${encodeURIComponent(c.id)}`;
+    const figs = caseFigures(c);
+    const owed = figs.outstanding.gt(0) ? figs.outstanding : D(c.amount);
+    const amount = owed.gt(0) ? { value: owed.toFixed(2), currency: c.currency } : null;
+    // A follow-up date the user set (or an expected refund date that passed) comes first.
+    const step = caseNextAction(c, today());
+    if (step && step.overdueDays > 0) {
+      out.push({ id: `case:${c.id}`, kind: "followup", urgency: "overdue", severity: "medium", vendorName: c.vendorName, reason: `${step.label}. ${c.title}`, amount, days: step.overdueDays, dated: true, findings: 0, href, cta: c.status === "credit_issued" ? "Check whether it arrived" : "Follow up with the vendor" });
+      continue;
+    }
+    if (c.status !== "disputed" || c.followUpDate) continue; // a dated follow-up that is not due yet is not a nudge
+    const t = Date.parse(c.updatedAt);
+    if (!Number.isFinite(t)) continue;
+    const quiet = Math.floor((now - t) / DAY);
+    if (quiet < replyAfter) continue;
+    out.push({ id: `case:${c.id}`, kind: "followup", urgency: "overdue", severity: "medium", vendorName: c.vendorName, reason: `Dispute with no update for ${quiet} days: ${c.title}`, amount, days: quiet, dated: false, findings: 0, href, cta: "Follow up with the vendor" });
+  }
+  return out.sort((a, b) =>
+    TIER[a.urgency] - TIER[b.urgency]
+    || SEV[a.severity] - SEV[b.severity]
+    || (a.amount && b.amount && a.amount.currency === b.amount.currency ? D(b.amount.value).comparedTo(D(a.amount.value)) : 0)
+    || (a.days ?? 9999) - (b.days ?? 9999));
 }
 
 export interface VendorStake { vendorId: string; vendorName: string; amount: Decimal; findings: number }
@@ -282,7 +378,7 @@ export function atStakeByCurrency(state: AppState, audits: Audits): { totals: Cu
   const map = new Map<Currency, CurrencyTotal>();
   let tone: "bad" | "warn" | null = null;
   for (const inv of state.invoices) {
-    if (inv.isCredit) continue;
+    if (inv.isCredit || isSimulated(inv)) continue; // simulated figures are invented: never part of a money total
     const a = audits[inv.id];
     if (!a) continue;
     const open = a.findings.filter((f) => isOpen(state, f));
@@ -297,7 +393,9 @@ export function atStakeByCurrency(state: AppState, audits: Audits): { totals: Cu
   return { totals, tone };
 }
 
-export interface Reminder { id: string; kind: "review" | "due" | "reply"; text: string; href: string }
+const fmtShortDate = (t: number) => new Date(t).toISOString().slice(0, 10);
+
+export interface Reminder { id: string; kind: "review" | "due" | "reply" | "renewal"; text: string; href: string }
 
 /** In-app reminders only (nothing is emailed or pushed). Each type honours its Settings toggle. */
 export function activeReminders(state: AppState, audits: Audits, now = Date.now()): Reminder[] {
@@ -309,7 +407,7 @@ export function activeReminders(state: AppState, audits: Audits, now = Date.now(
     const vendor = vendors.get(vendorId);
     return !vendor || vendor.monitoring.notify;
   };
-  const withOpen = state.invoices.filter((i) => canNotify(i.vendorId) && audits[i.id]?.findings.some((f) => isOpen(state, f)));
+  const withOpen = state.invoices.filter((i) => canNotify(i.vendorId) && !isSimulated(i) && audits[i.id]?.findings.some((f) => isOpen(state, f)));
   if (r.overdueReview) {
     const stale = withOpen.filter((i) => (now - i.createdAt) / day >= r.reviewAfterDays);
     if (stale.length) out.push({ id: `review:${stale.map((i) => i.id).sort().join(",")}`, kind: "review", text: `${stale.length} flagged invoice${stale.length === 1 ? " has" : "s have"} waited over ${r.reviewAfterDays} days for review`, href: "/invoices?status=attention" });
@@ -324,6 +422,20 @@ export function activeReminders(state: AppState, audits: Audits, now = Date.now(
         const dueLabel = days < 0 ? `was due ${-days} day${days === -1 ? "" : "s"} ago` : days === 0 ? "is due today" : `is due in ${days} day${days === 1 ? "" : "s"}`;
         out.push({ id: `due:${i.id}:${i.dueDate}`, kind: "due", text: `${i.vendorName}${invoiceLabel} ${dueLabel}, with open findings`, href: `/invoices/${i.id}` });
       }
+    }
+  }
+  if (r.upcomingDue) {
+    // Renewals you entered: the date that matters is the notice deadline, not the renewal itself.
+    for (const v of state.vendors) {
+      const c = v.contract;
+      const renew = c?.renewalDate ? parseISO(c.renewalDate) : null;
+      if (!c || renew === null || !canNotify(v.id)) continue;
+      const notice = c.noticeDays ?? 0;
+      const toRenewal = Math.round((renew - (parseISO(today()) ?? renew)) / day);
+      const toNotice = toRenewal - notice;
+      if (toRenewal < 0 || toNotice > 30) continue;
+      const when = toNotice > 0 ? `Decide by ${fmtShortDate(renew - notice * day)} (${toNotice} day${toNotice === 1 ? "" : "s"})` : `The notice period has started; renewal is in ${toRenewal} day${toRenewal === 1 ? "" : "s"}`;
+      out.push({ id: `renewal:${v.id}:${c.renewalDate}`, kind: "renewal", text: `${v.name} renews on ${c.renewalDate}. ${when} if you want to cancel or renegotiate.`, href: `/vendors/${v.id}` });
     }
   }
   if (r.vendorReply) {

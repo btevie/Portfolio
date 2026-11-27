@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from "next";
 import { Fira_Code, Fira_Sans, Manrope } from "next/font/google";
 import "./globals.css";
 import { AppShell } from "@/components/app-shell";
+import { PwaRegister } from "@/components/pwa-register";
+import { MirrorRestore } from "@/components/mirror-restore";
 import { cn } from "@/lib/utils";
 
 const firaSans = Fira_Sans({ subsets: ["latin"], weight: ["300", "400", "500", "600", "700"], variable: "--font-fira-sans" });
@@ -22,6 +24,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head suppressHydrationWarning><script suppressHydrationWarning dangerouslySetInnerHTML={{ __html: `try{var t=localStorage.getItem("overbill:theme");if(!t)t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.dataset.theme=t}catch(e){}` }} /></head>
       <body className="min-h-full">
         <AppShell>{children}</AppShell>
+        <PwaRegister />
+        <MirrorRestore />
       </body>
     </html>
   );

@@ -54,7 +54,7 @@ const iso = (s: string | undefined): string => {
 
 function finalize(p: {
   vendorName?: string; number?: string; date?: string; dueDate?: string; currency?: string; taxRate?: string;
-  lines: Line[]; subtotal?: string; discounts?: string; taxAmount?: string; total?: string; method: "csv" | "text" | "pdf"; defaultCurrency: Currency; isCredit?: boolean;
+  lines: Line[]; subtotal?: string; discounts?: string; taxAmount?: string; total?: string; method: "csv" | "text" | "pdf" | "ocr"; defaultCurrency: Currency; isCredit?: boolean;
 }): ExtractedInvoice {
   const items = p.lines.filter((l) => l.kind === "item");
   const feeLines = p.lines.filter((l) => l.kind === "fee");
@@ -129,7 +129,7 @@ export function parseCsv(text: string, defaultCurrency: Currency): ExtractedInvo
   });
 }
 
-function detectDelimiter(text: string): string {
+export function detectDelimiter(text: string): string {
   const counts = new Map([[",", 0], [";", 0], ["\t", 0]]);
   let quoted = false;
   for (let i = 0; i < text.length; i++) {
@@ -142,7 +142,7 @@ function detectDelimiter(text: string): string {
   return [...counts].sort((a, b) => b[1] - a[1])[0][0];
 }
 
-function splitCsv(text: string, delimiter: string): string[][] {
+export function splitCsv(text: string, delimiter: string): string[][] {
   const out: string[][] = []; let row: string[] = []; let cell = ""; let q = false;
   for (let i = 0; i < text.length; i++) {
     const c = text[i];
@@ -169,7 +169,7 @@ Tax: 11.34
 Total: 65.34`;
 
 /** Key/value lines plus pipe-delimited items:  description | qty | unit price | total [| fee] */
-export function parseText(text: string, defaultCurrency: Currency, method: "text" | "pdf" = "text"): ExtractedInvoice {
+export function parseText(text: string, defaultCurrency: Currency, method: "text" | "pdf" | "ocr" = "text"): ExtractedInvoice {
   const kv: Record<string, string> = {};
   const lines: Line[] = [];
   for (const raw of text.split(/\r?\n/)) {

@@ -12,7 +12,7 @@ const google = !!process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID; // only widen the pol
 
 const csp = [
   "default-src 'self'",
-  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}${google ? " https://accounts.google.com/gsi/client" : ""}`,
+  `script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'${isDev ? " 'unsafe-eval'" : ""}${google ? " https://accounts.google.com/gsi/client" : ""}`,
   `style-src 'self' 'unsafe-inline'${google ? " https://accounts.google.com/gsi/style" : ""}`,
   `img-src 'self' data: blob:${google ? " https://*.googleusercontent.com" : ""}`,
   ...(google ? ["frame-src https://accounts.google.com/gsi/"] : []),

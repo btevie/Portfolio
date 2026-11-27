@@ -10,11 +10,13 @@ import { effectiveClassification, invoiceExposure, isOpen, today } from "@/lib/d
 import { actions } from "@/lib/data/store";
 import { fmtDate } from "@/lib/format";
 import { dueDatesCalendar } from "@/lib/calendar";
+import { safeCsvRow } from "@/lib/csv-safe";
+import { recurringSignals } from "@/lib/recurring-watch";
+import { isSimulated } from "@/lib/evidence";
 import { cn } from "@/lib/cn";
 import type { Currency, Invoice } from "@/lib/types";
 import { Button, EmptyState, LinkButton } from "@/components/ui";
 
-const csvCell = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
 
 /** Per-currency totals as text. Currencies are never added together. */
 function totals(list: Invoice[]): string {
@@ -34,7 +36,7 @@ function dueText(due: string): { text: string; late: boolean } {
 export function PayRun() {
   const { state, audits } = useAudited();
   const { ready, hold } = useMemo(() => {
-    const unpaid = state.invoices.filter((i) => i.paymentStatus !== "paid" && !i.isCredit).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+    const unpaid = state.invoices.filter((i) => i.paymentStatus !== "paid" && !i.isCredit && !isSimulated(i)).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
     const rows = unpaid.map((invoice) => {
       const a = audits[invoice.id];
       const open = a ? a.findings.filter((f) => isOpen(state, f)) : [];
@@ -44,6 +46,7 @@ export function PayRun() {
   }, [state, audits]);
 
   const credits = state.invoices.filter((i) => i.isCredit);
+  const watch = useMemo(() => recurringSignals(state.invoices, today()), [state.invoices]);
 
   function exportCalendar() {
     const flagged = new Set(hold.map((r) => r.invoice.id));
@@ -55,10 +58,20 @@ export function PayRun() {
 
   function exportReady() {
     const head = ["vendor", "invoice_number", "due_date", "currency", "amount"];
-    const lines = ready.map(({ invoice: i }) => [i.vendorName, i.number, i.dueDate, i.currency, i.total].map(csvCell).join(","));
+    const lines = ready.map(({ invoice: i }) => safeCsvRow([i.vendorName, i.number, i.dueDate, i.currency, i.total]));
     const blob = new Blob([[head.join(","), ...lines].join("\n")], { type: "text/csv" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob); a.download = `overbill-pay-run-${today()}.csv`; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+
+  /** What to hold, and why, for whoever pays the bills. Amounts are possible, not confirmed. */
+  function exportHold() {
+    const head = ["vendor", "invoice_number", "due_date", "currency", "invoice_total", "possible_overcharge_not_confirmed", "why_held"];
+    const lines = hold.map(({ invoice: i, open, exposure }) => safeCsvRow([i.vendorName, i.number, i.dueDate, i.currency, i.total, exposure.toFixed(2), open.map((f) => f.title).join(" | ")]));
+    const blob = new Blob([[safeCsvRow(head), ...lines].join("\n")], { type: "text/csv" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = `overbill-hold-list-${today()}.csv`; a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
 
@@ -66,7 +79,7 @@ export function PayRun() {
     return (
       <>
         <header className="mb-4"><h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Pay run</h1></header>
-        {credits.length > 0 && <p className="mb-4 rounded-2xl bg-muted px-4 py-3 text-sm text-muted-foreground">You have {credits.length} credit note{credits.length === 1 ? "" : "s"} worth {totals(credits)}. Ask the vendor to apply {credits.length === 1 ? "it" : "them"} to your next payment.</p>}
+        {credits.length > 0 && <p className="mb-4 rounded-2xl bg-muted px-4 py-3 text-sm text-muted-foreground">You have {credits.length} credit note{credits.length === 1 ? "" : "s"} worth {totals(credits)}. They are not subtracted here. <Link href="/invoices?status=credits" className="font-medium text-primary hover:underline">Check whether each was applied or refunded</Link>.</p>}
         <EmptyState icon={Wallet} title="Nothing to pay" action={<LinkButton href="/invoices/new" variant="primary">Check an invoice</LinkButton>}>{state.invoices.some((i) => !i.isCredit) ? "Every bill is marked paid. New invoices you check will show up here." : "No bills have been added yet. Credit notes are tracked separately and are not payable."}</EmptyState>
       </>
     );
@@ -87,12 +100,15 @@ export function PayRun() {
       </section>
 
       {credits.length > 0 && (
-        <p className="mb-4 rounded-2xl bg-muted px-4 py-3 text-sm text-muted-foreground">You also hold {credits.length} credit note{credits.length === 1 ? "" : "s"} worth {totals(credits)}. Ask the vendor to apply {credits.length === 1 ? "it" : "them"} to your next payment.</p>
+        <p className="mb-4 rounded-2xl bg-muted px-4 py-3 text-sm text-muted-foreground">You also hold {credits.length} credit note{credits.length === 1 ? "" : "s"} worth {totals(credits)}. Amounts to pay above are the full bills; credits are not subtracted. <Link href="/invoices?status=credits" className="font-medium text-primary hover:underline">Check whether each was applied or refunded</Link>.</p>
       )}
 
       {hold.length > 0 && (
         <section aria-labelledby="hold-h" className="mb-5">
-          <h2 id="hold-h" className="mb-2 flex items-center gap-2 text-sm font-semibold"><PauseCircle className="size-4 text-warn" aria-hidden />Hold: review before paying</h2>
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <h2 id="hold-h" className="flex items-center gap-2 text-sm font-semibold"><PauseCircle className="size-4 text-warn" aria-hidden />Hold: review before paying</h2>
+            <button type="button" onClick={exportHold} className="inline-flex min-h-11 cursor-pointer items-center gap-1.5 text-sm font-medium text-primary hover:underline sm:min-h-9"><Download className="size-3.5" aria-hidden />Hold list (CSV)</button>
+          </div>
           <ul className="space-y-2">
             {hold.map(({ invoice: i, open, exposure }, k) => {
               const due = dueText(i.dueDate);
@@ -135,6 +151,24 @@ export function PayRun() {
         )}
         <p className="mt-3 text-xs text-muted-foreground">&quot;No issues detected&quot; means these checks found nothing unusual. It is not a guarantee. Overbill never makes payments; this list is for you to pay from your own bank.</p>
       </section>
+
+      {watch.length > 0 && (
+        <section aria-labelledby="watch-h" className="mt-6" data-testid="recurring-watch">
+          <h2 id="watch-h" className="mb-1 text-sm font-semibold">Recurring bills to double-check</h2>
+          <p className="mb-2 text-xs text-muted-foreground">Worked out from each vendor&apos;s own bill dates and totals. These are prompts to look, not proof of a problem.</p>
+          <ul className="space-y-2">
+            {watch.map((s) => (
+              <li key={`${s.vendorId}-${s.currency}-${s.kind}`} className="rounded-2xl bg-card px-4 py-3 ring-1 ring-line">
+                <Link href={`/vendors/${s.vendorId}`} className="block">
+                  <p className="text-sm font-semibold">{s.vendorName} <span className="font-normal text-muted-foreground">· {s.headline}</span></p>
+                  <p className="mt-1 text-xs text-muted-foreground">{s.detail}</p>
+                  <dl className="mt-2 grid gap-x-4 gap-y-1 text-xs sm:grid-cols-3">{s.figures.map((f) => <div key={f.label}><dt className="text-muted-foreground">{f.label}</dt><dd className="num font-medium">{f.value}</dd></div>)}</dl>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </div>
   );
 }

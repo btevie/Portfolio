@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createSeedState } from "./seed";
-import { actionQueue, auditAll, dashboardMetrics, stakeByVendor, pendingCreditNote, recoveryStats, invoiceExposure } from "./selectors";
+import { actionQueue, nextActions, auditAll, dashboardMetrics, stakeByVendor, pendingCreditNote, recoveryStats, invoiceExposure } from "./selectors";
 import { D } from "../audit/money";
 import type { AuditFinding, RecoveryRecord } from "../types";
 
@@ -89,5 +89,50 @@ describe("invoiceExposure", () => {
   });
   it("never exceeds the invoice total", () => {
     expect(invoiceExposure([f("tax", "400.00"), f("unexpected_fee", "400.00")], "500.00").toFixed(2)).toBe("500.00");
+  });
+});
+
+describe("nextActions", () => {
+  const state = createSeedState();
+  const audits = auditAll(state);
+  it("lists each invoice once and ranks unpaid before paid", () => {
+    const list = nextActions(state, audits);
+    const invIds = list.filter((a) => a.kind === "invoice").map((a) => a.id);
+    expect(new Set(invIds).size).toBe(invIds.length);
+    const firstPaid = list.findIndex((a) => a.urgency === "paid");
+    if (firstPaid >= 0) expect(list.slice(firstPaid).every((a) => a.urgency === "paid")).toBe(true);
+  });
+  it("never sums across currencies: every amount carries its own currency", () => {
+    for (const a of nextActions(state, audits)) if (a.amount) expect(["EUR", "USD", "GBP"]).toContain(a.amount.currency);
+  });
+  it("adds a follow-up for a dispute that has gone quiet", () => {
+    const s = createSeedState();
+    s.recovery = [{ ...s.recovery[0], id: "q1", status: "disputed", updatedAt: "2020-01-01T00:00:00.000Z" }];
+    const list = nextActions(s, auditAll(s));
+    expect(list.some((a) => a.id === "case:q1" && a.kind === "followup" && a.urgency === "overdue")).toBe(true);
+  });
+  it("does not change the data it reads", () => {
+    const before = JSON.stringify(state);
+    nextActions(state, audits);
+    expect(JSON.stringify(state)).toBe(before);
+  });
+});
+
+describe("nextActions follow-ups", () => {
+  it("surfaces a case whose user-set follow-up date has passed, with what is still owed, and no duplicate invoice row once paid", () => {
+    const state = createSeedState();
+    const audits = auditAll(state);
+    const f = Object.values(audits).flatMap((a) => a.findings)[0];
+    const inv = state.invoices.find((i) => i.id === f.invoiceId)!;
+    const s = {
+      ...state,
+      invoices: state.invoices.map((i) => (i.id === inv.id ? { ...i, paymentStatus: "paid" as const } : i)),
+      recovery: [{ id: "rc1", vendorId: inv.vendorId, vendorName: inv.vendorName, invoiceId: inv.id, findingId: f.id, title: "Test case", amount: "100.00", currency: inv.currency, status: "credit_issued" as const, notes: "", createdAt: "2026-01-01", updatedAt: "2026-01-02", confirmedAmount: "80.00", recoveredAmount: "30.00", followUpDate: "2026-01-05" }],
+    };
+    const list = nextActions(s, auditAll(s));
+    const c = list.find((a) => a.id === "case:rc1")!;
+    expect(c.dated).toBe(true);
+    expect(c.amount).toEqual({ value: "50.00", currency: inv.currency });
+    expect(list.some((a) => a.id === `inv:${inv.id}`)).toBe(false);
   });
 });

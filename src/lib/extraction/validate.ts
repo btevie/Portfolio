@@ -7,6 +7,7 @@ const MIME_OK: Record<string, string[]> = {
   jpeg: ["image/jpeg"],
   webp: ["image/webp"],
   csv: ["text/csv", "application/vnd.ms-excel", "text/plain", ""],
+  eml: ["message/rfc822", "text/plain", ""],
 };
 
 const extOf = (name: string) => name.split(".").pop()?.toLowerCase() ?? "";
@@ -14,11 +15,11 @@ const extOf = (name: string) => name.split(".").pop()?.toLowerCase() ?? "";
 /** First-pass checks on what the browser reports. The extension and MIME type are claims, not proof: see `sniffFile`. */
 export function validateFile(f: { name: string; type: string; size: number }, opts: { mock?: boolean } = {}): string | null {
   const ext = extOf(f.name);
-  if (!(ACCEPTED_EXT as readonly string[]).includes(ext)) return `"${f.name}" isn't supported. Upload a PDF, PNG, JPG, WebP or CSV.`;
+  if (!(ACCEPTED_EXT as readonly string[]).includes(ext)) return `"${f.name}" isn't supported. Upload a PDF, PNG, JPG, WebP, CSV or saved email (.eml).`;
   if (f.size === 0) return `"${f.name}" is empty.`;
   if (f.size > MAX_FILE_BYTES) return `"${f.name}" is larger than ${MAX_FILE_BYTES / 1024 / 1024} MB.`;
   if (!MIME_OK[ext].includes(f.type)) return `"${f.name}" doesn't look like a real .${ext} file (type: ${f.type || "unknown"}).`;
-  if (ext !== "csv" && !(opts.mock ?? MOCK_EXTRACTION_ENABLED)) return `Reading PDFs and images isn't available in this build. Export the invoice as a CSV or paste its text instead.`;
+  if (ext !== "csv" && ext !== "eml" && !(opts.mock ?? MOCK_EXTRACTION_ENABLED)) return `Reading PDFs and images isn't available in this build. Export the invoice as a CSV or paste its text instead.`;
   return null;
 }
 
@@ -39,7 +40,7 @@ export function checkSignature(name: string, head: Uint8Array): string | null {
     case "png": return startsWith(head, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) ? null : bad;
     case "jpg": case "jpeg": return startsWith(head, [0xff, 0xd8, 0xff]) ? null : bad;
     case "webp": return startsWith(head, ascii("RIFF")) && startsWith(head, ascii("WEBP"), 8) ? null : bad;
-    case "csv": return head.includes(0) ? bad : null; // text must not contain NUL bytes
+    case "csv": case "eml": return head.includes(0) ? bad : null; // text must not contain NUL bytes
     default: return bad;
   }
 }

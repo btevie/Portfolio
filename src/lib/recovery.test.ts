@@ -1,0 +1,83 @@
+import { describe, expect, it } from "vitest";
+import { applyEvent, caseFigures, nextAction, validateEvent, type EventInput } from "./recovery";
+import { cleanRecoveryExtras } from "./data/validate-state";
+import { recoveryStats } from "./data/selectors";
+import type { RecoveryRecord } from "./types";
+
+const base = (over: Partial<RecoveryRecord> = {}): RecoveryRecord => ({
+  id: "rec-x", vendorId: "v1", vendorName: "Acme", title: "Duplicate charge", amount: "100.00", currency: "EUR", status: "flagged",
+  notes: "", createdAt: "2026-11-01", updatedAt: "2026-11-01", ...over,
+});
+const run = (r: RecoveryRecord, e: EventInput, asOf = "2026-11-20") => {
+  const err = validateEvent(r, e, asOf);
+  if (err) throw new Error(err);
+  return applyEvent(r, e, asOf);
+};
+
+describe("recovery case timeline", () => {
+  it("contacting the vendor moves a flagged case to disputed and sets a 7-day follow-up", () => {
+    const r = run(base(), { kind: "contacted", date: "2026-11-20", text: "Emailed billing" });
+    expect(r.status).toBe("disputed");
+    expect(r.followUpDate).toBe("2026-11-27");
+    expect(r.events?.map((e) => e.kind)).toEqual(["disputed", "status"]);
+  });
+
+  it("keeps promised, applied and received apart and only finishes when it all arrived", () => {
+    let r = run(base({ status: "vendor_responded" }), { kind: "promise", amount: "80", date: "2026-12-01" });
+    expect(r.status).toBe("credit_issued");
+    expect(caseFigures(r).promised?.toFixed(2)).toBe("80.00");
+    r = run(r, { kind: "applied", amount: "30", date: "2026-11-20" });
+    expect(r.status).toBe("credit_issued");
+    let f = caseFigures(r);
+    expect([f.promised?.toFixed(2), f.applied.toFixed(2), f.received.toFixed(2), f.outstanding.toFixed(2)]).toEqual(["80.00", "30.00", "0.00", "50.00"]);
+    r = run(r, { kind: "received", amount: "50", date: "2026-11-20", reference: "RF-9" });
+    f = caseFigures(r);
+    expect(r.status).toBe("recovered");
+    expect([f.applied.toFixed(2), f.received.toFixed(2), f.outstanding.toFixed(2)]).toEqual(["30.00", "50.00", "0.00"]);
+  });
+
+  it("refuses amounts that are invalid, negative, in the future, or above what was promised", () => {
+    const r = run(base({ status: "vendor_responded" }), { kind: "promise", amount: "60" });
+    expect(validateEvent(r, { kind: "received", amount: "-5", date: "2026-11-20" }, "2026-11-20")).toMatch(/greater than zero/);
+    expect(validateEvent(r, { kind: "received", amount: "abc", date: "2026-11-20" }, "2026-11-20")).toMatch(/greater than zero/);
+    expect(validateEvent(r, { kind: "received", amount: "10", date: "2026-12-31" }, "2026-11-20")).toMatch(/future/);
+    expect(validateEvent(r, { kind: "received", amount: "61", date: "2026-11-20" }, "2026-11-20")).toMatch(/more than the promised/);
+    expect(validateEvent(r, { kind: "contacted", date: "not-a-date", text: "" }, "2026-11-20")).toMatch(/valid date/);
+  });
+
+  it("never loses existing data: legacy notes and legacy 'recovered' records still read correctly", () => {
+    const legacy = base({ status: "recovered", notes: "Vendor refunded on 26 Nov." });
+    const f = caseFigures(legacy);
+    expect(f.legacy).toBe(true);
+    expect(f.received.toFixed(2)).toBe("100.00");
+    expect(f.outstanding.toFixed(2)).toBe("0.00");
+    const after = run(base({ notes: "keep me" }), { kind: "note", text: "called" });
+    expect(after.notes).toBe("keep me");
+  });
+
+  it("next action reflects overdue follow-ups and never invents dates", () => {
+    const r = base({ status: "disputed", followUpDate: "2026-11-10" });
+    const a = nextAction(r, "2026-11-20")!;
+    expect(a.overdueDays).toBe(10);
+    expect(a.tone).toBe("bad");
+    expect(nextAction(base({ status: "disputed" }), "2026-11-20")!.due).toBeUndefined();
+    expect(nextAction(base({ status: "dismissed" }), "2026-11-20")).toBeNull();
+  });
+
+  it("stats keep received and applied separate and count only what is still outstanding as potential", () => {
+    const r = run(run(base({ status: "vendor_responded" }), { kind: "promise", amount: "80" }), { kind: "applied", amount: "30", date: "2026-11-20" }, "2026-11-20");
+    const s = recoveryStats([r], "EUR");
+    expect([s.applied.toFixed(2), s.received.toFixed(2), s.recovered.toFixed(2), s.potential.toFixed(2)]).toEqual(["30.00", "0.00", "30.00", "70.00"]);
+    expect(s.promisedOutstanding.toFixed(2)).toBe("50.00");
+  });
+
+  it("restoring saved data drops malformed tracking fields but keeps the case", () => {
+    const dirty = { ...base(), confirmedAmount: "oops", appliedAmount: "-1", followUpDate: "nope", events: [{ id: "e1", at: "2026-11-01T00:00:00Z", kind: "note", text: "ok" }, { id: "e2", at: "bad", kind: "note", text: "x" }, { id: "e3", at: "2026-11-01T00:00:00Z", kind: "hax", text: "x" }] } as unknown as RecoveryRecord;
+    const c = cleanRecoveryExtras(dirty);
+    expect(c.id).toBe("rec-x");
+    expect(c.confirmedAmount).toBeUndefined();
+    expect(c.appliedAmount).toBeUndefined();
+    expect(c.followUpDate).toBeUndefined();
+    expect(c.events).toHaveLength(1);
+  });
+});

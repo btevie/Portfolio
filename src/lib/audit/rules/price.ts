@@ -8,6 +8,28 @@ export const priceHistoryRule: Rule = (inv, ctx) => {
   if (!cmp.reliable || cmp.pctDiff === null || cmp.baseline === null || D(cmp.baseline).isZero()) return [];
   const pctDiff = D(cmp.current).minus(D(cmp.baseline)).div(D(cmp.baseline)).times(100);
   if (pctDiff.lte(0)) return []; // decreases are shown in the comparison, not flagged
+  const cap = ctx.vendor?.contract?.upliftCapPct;
+  if (cap && pctDiff.gt(D(cap))) {
+    // The user entered this limit themselves, so a breach is measured against their own contract rather than a guess about normal.
+    const m = (v: string) => formatMoney(v, inv.currency);
+    const diff = D(cmp.absDiff!);
+    const taxFactor = weightedTaxFactor(inv.lineItems.filter((line) => line.kind === "item"), inv.taxRate);
+    const allowed = D(cmp.baseline).times(D(cap).div(100).plus(1));
+    const over = D(cmp.current).minus(allowed);
+    return [makeFinding(inv, {
+      ruleId: "price_history", key: "cap",
+      classification: "LIKELY_ERROR", severity: "high",
+      title: `Increase of ${cmp.pctDiff}% is above the ${cap}% cap in your contract with ${inv.vendorName}`,
+      explanation: `The net charge is ${m(cmp.current)} against a ${cmp.baselineLabel} of ${m(cmp.baseline)} (${formatMoney(diff, inv.currency, { signed: true })}, +${cmp.pctDiff}%). You told Overbill the contract caps increases at ${cap}%, which allows up to ${m(str2(allowed))}.`,
+      expected: `${m(str2(allowed))} at most (${cap}% cap)`, actual: m(cmp.current), difference: formatMoney(over, inv.currency, { signed: true }),
+      evidence: [`Contract cap you entered: ${cap}%`, `${cmp.sampleSize} earlier invoices from this vendor`, `Change vs ${cmp.baselineLabel}: ${cmp.pctDiff}%`, `Previous: ${cmp.previous ?? "—"} · average: ${cmp.average ?? "—"}`],
+      confidence: "high",
+      confidenceReason: "The cap is a figure you entered, and the increase is measured from this vendor's own earlier invoices.",
+      uncertainty: "Check the cap really applies to this charge: it may only cover renewals, exclude added seats or usage, or have been amended since.",
+      recommendedAction: "Ask the vendor to explain the increase against the cap in your agreement, and to correct the invoice if it breaches it.",
+      amountAtRisk: str2(over.times(1 + taxFactor)),
+    })];
+  }
   const variable = ctx.vendor?.billing === "variable";
   const scale = ctx.config.sensitivityScale * (variable ? ctx.config.variableMultiplier : 1);
   const t = ctx.config.thresholds;

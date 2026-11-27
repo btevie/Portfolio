@@ -1,5 +1,6 @@
 import type { AppState } from "../types";
 import { createSeedState } from "./seed";
+import { mirrorClear, mirrorSave } from "./idb-mirror";
 import { parseStoredState } from "./validate-state";
 
 /**
@@ -27,8 +28,10 @@ export const localRepository: Repository = {
     }
   },
   save(state) {
+    const json = JSON.stringify(state);
+    mirrorSave(json); // second copy in IndexedDB, written even when localStorage is full
     try {
-      window.localStorage.setItem(KEY, JSON.stringify(state));
+      window.localStorage.setItem(KEY, json);
       return true;
     } catch {
       return false; // storage full or blocked: the store surfaces this to the user
@@ -36,6 +39,7 @@ export const localRepository: Repository = {
   },
   clear() {
     try { window.localStorage.removeItem(KEY); } catch { /* ignore */ }
+    void mirrorClear();
   },
 };
 

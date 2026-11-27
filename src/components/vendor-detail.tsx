@@ -8,7 +8,8 @@ import { useVendorStats } from "@/lib/data/hooks";
 import { detectRecurring } from "@/lib/data/selectors";
 import { actions } from "@/lib/data/store";
 import { fmtDate } from "@/lib/format";
-import type { VendorCategory } from "@/lib/types";
+import { parseISO } from "@/lib/audit/normalize";
+import type { Vendor, VendorCategory } from "@/lib/types";
 import { cn } from "@/lib/cn";
 import { Button, Card, ClassBadge, Disclosure, EmptyState, Field, fieldClass, LinkButton, MotionRow, PageHeader, Pill, SectionHeader, Toggle } from "@/components/ui";
 import { LineChart } from "@/components/charts";
@@ -123,6 +124,8 @@ export function VendorDetail({ id }: { id: string }) {
             </form>
           </Disclosure>
 
+          <ContractCard vendor={vendor} />
+
           <Disclosure title="Monitoring">
             <div className="divide-y divide-line px-5">
               <Toggle id="mon-enabled" label="Monitor this vendor" description="Include price changes in Dashboard trend alerts. Existing invoice findings stay visible." checked={vendor.monitoring.enabled} onChange={(v) => actions.updateVendor(vendor.id, { monitoring: { ...vendor.monitoring, enabled: v } })} />
@@ -134,5 +137,36 @@ export function VendorDetail({ id }: { id: string }) {
         </div>
       </div>
     </>
+  );
+}
+
+/** Contract details you enter yourself. Used for the price-cap check and for renewal reminders; nothing is assumed. */
+function ContractCard({ vendor }: { vendor: Vendor }) {
+  const c = vendor.contract;
+  const [renewal, setRenewal] = useState(c?.renewalDate ?? "");
+  const [notice, setNotice] = useState(c?.noticeDays !== undefined ? String(c.noticeDays) : "");
+  const [cap, setCap] = useState(c?.upliftCapPct ?? "");
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  function save(e: React.FormEvent) {
+    e.preventDefault();
+    if (renewal && parseISO(renewal) === null) return setMsg({ ok: false, text: "Enter the renewal date as a real date." });
+    if (notice && !/^\d{1,3}$/.test(notice)) return setMsg({ ok: false, text: "Notice period is a whole number of days, up to 999." });
+    if (cap && !/^\d{1,3}(\.\d{1,2})?$/.test(cap)) return setMsg({ ok: false, text: "The price cap is a percentage such as 5 or 7.5." });
+    const next = { ...(renewal ? { renewalDate: renewal } : {}), ...(notice ? { noticeDays: Number(notice) } : {}), ...(cap ? { upliftCapPct: cap } : {}) };
+    actions.updateVendor(vendor.id, { contract: Object.keys(next).length ? next : undefined });
+    setMsg({ ok: true, text: Object.keys(next).length ? "Saved. Overbill will use these in its checks and reminders." : "Contract details cleared." });
+  }
+
+  return (
+    <Disclosure title="Contract & renewal" subtitle="Optional: a price cap and a renewal date">
+      <form onSubmit={save} className="grid gap-3 sm:grid-cols-3">
+        <label className="text-sm font-medium">Renewal date<input type="date" className={`${fieldClass} mt-1.5`} value={renewal} onChange={(e) => setRenewal(e.target.value)} /></label>
+        <label className="text-sm font-medium">Notice needed (days)<input inputMode="numeric" placeholder="e.g. 30" className={`${fieldClass} mt-1.5`} value={notice} onChange={(e) => setNotice(e.target.value)} /></label>
+        <label className="text-sm font-medium">Price cap (%)<input inputMode="decimal" placeholder="e.g. 5" className={`${fieldClass} mt-1.5`} value={cap} onChange={(e) => setCap(e.target.value)} /></label>
+        <p className="text-xs text-muted-foreground sm:col-span-3">A price above the cap is flagged as a likely error. You get a reminder before the notice deadline so you can cancel or renegotiate. Overbill only uses what you enter here.</p>
+        <div className="flex items-center gap-3 sm:col-span-3"><Button type="submit" variant="primary" size="sm">Save</Button>{msg && <p role="status" className={msg.ok ? "text-sm text-ok" : "text-sm text-bad"}>{msg.text}</p>}</div>
+      </form>
+    </Disclosure>
   );
 }

@@ -19,8 +19,10 @@ export interface ExtractedInvoice {
   isCredit?: boolean;
   /** Fields that could not be read confidently. The UI asks the user to confirm them before auditing. */
   lowConfidence: FieldKey[];
+  /** Set when the user confirms a review step: the fields that had been low-confidence. Kept so the audit can say so. */
+  confirmedFields?: FieldKey[];
   /** How this was produced, shown to the user. */
-  method: "mock-demo" | "csv" | "text" | "pdf";
+  method: "mock-demo" | "csv" | "text" | "pdf" | "ocr";
 }
 
 export type ExtractionInput =
@@ -48,4 +50,4 @@ export const MAX_DESC_CHARS = 200;
  * handles real invoices, so those file types are refused instead of being answered with invented figures.
  */
 export const MOCK_EXTRACTION_ENABLED = process.env.NEXT_PUBLIC_OVERBILL_MOCK_EXTRACTION !== "off";
-export const ACCEPTED_EXT = ["pdf", "png", "jpg", "jpeg", "webp", "csv"] as const;
+export const ACCEPTED_EXT = ["pdf", "png", "jpg", "jpeg", "webp", "csv", "eml"] as const;

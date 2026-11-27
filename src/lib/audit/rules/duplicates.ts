@@ -97,7 +97,7 @@ export const duplicateLineRule: Rule = (inv) => {
     groups.set(key, [...(groups.get(key) ?? []), l]);
   }
   const out: AuditFinding[] = [];
-  for (const [key, lines] of groups) {
+  for (const lines of groups.values()) {
     if (lines.length < 2) continue;
     const extra = lines.slice(1).reduce((a, l) => a.plus(D(l.total)), D(0));
     out.push(makeFinding(inv, {

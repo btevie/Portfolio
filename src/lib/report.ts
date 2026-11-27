@@ -1,13 +1,17 @@
 import { D, formatMoney } from "./audit/money";
 import { STATUS_LABEL } from "./format";
 import { atStakeByCurrency, type Audits } from "./data/selectors";
+import { caseFigures } from "./recovery";
 import type { AppState, Currency, RecoveryRecord } from "./types";
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
-function byCurrency(records: RecoveryRecord[], statuses: string[]): string {
+function byCurrency(records: RecoveryRecord[], include: (r: RecoveryRecord) => boolean, amount: (r: RecoveryRecord) => ReturnType<typeof D>): string {
   const m = new Map<Currency, ReturnType<typeof D>>();
-  for (const r of records.filter((x) => statuses.includes(x.status))) m.set(r.currency, (m.get(r.currency) ?? D(0)).plus(D(r.amount)));
+  for (const r of records.filter(include)) {
+    const value = amount(r);
+    if (value.gt(0)) m.set(r.currency, (m.get(r.currency) ?? D(0)).plus(value));
+  }
   return [...m.entries()].map(([c, v]) => formatMoney(v, c)).join(" · ") || "—";
 }
 
@@ -20,6 +24,12 @@ export function savingsReportHtml(state: AppState, audits: Audits, opts: { redac
   const names = new Map<string, string>();
   const vendor = (id: string, name: string) => opts.redact ? (names.get(id) ?? (names.set(id, `Vendor ${names.size + 1}`), names.get(id)!)) : name;
   const stake = atStakeByCurrency(state, audits).totals.map((t) => formatMoney(t.amount, t.currency)).join(" · ") || "—";
+  const moneyRecovered = byCurrency(state.recovery, (r) => r.status !== "dismissed", (r) => caseFigures(r).resolved);
+  const pendingCredit = byCurrency(state.recovery, (r) => r.status === "credit_issued", (r) => caseFigures(r).outstanding);
+  const stillOpen = byCurrency(state.recovery, (r) => ["flagged", "disputed", "vendor_responded"].includes(r.status), (r) => {
+    const f = caseFigures(r);
+    return f.claimed.minus(f.resolved).gt(0) ? f.claimed.minus(f.resolved) : D(0);
+  });
   const cases = state.recovery.filter((r) => r.status !== "dismissed");
   const rows = cases.map((r) => `<tr><td>${esc(vendor(r.vendorId, r.vendorName))}</td><td>${esc(opts.redact ? "—" : r.title)}</td><td class="n">${esc(formatMoney(r.amount, r.currency))}</td><td>${esc(STATUS_LABEL[r.status] ?? r.status)}</td></tr>`).join("");
   const date = now.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
@@ -37,13 +47,13 @@ table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;p
 <button onclick="window.print()">Print or save as PDF</button>
 <h1>Savings report</h1><p class="sub">Prepared ${esc(date)} with Overbill${opts.redact ? " · vendor names hidden" : ""}</p>
 <div class="grid">
-<div class="card ok"><span>Money recovered</span><b>${esc(byCurrency(state.recovery, ["recovered"]))}</b></div>
-<div class="card"><span>Credit promised, not yet applied</span><b>${esc(byCurrency(state.recovery, ["credit_issued"]))}</b></div>
-<div class="card"><span>Claimed, still open</span><b>${esc(byCurrency(state.recovery, ["flagged", "disputed", "vendor_responded"]))}</b></div>
+<div class="card ok"><span>Money recovered or applied</span><b>${esc(moneyRecovered)}</b></div>
+<div class="card"><span>Promised, still outstanding</span><b>${esc(pendingCredit)}</b></div>
+<div class="card"><span>Claimed, still open</span><b>${esc(stillOpen)}</b></div>
 <div class="card warn"><span>Possible overcharges on unpaid and paid invoices</span><b>${esc(stake)}</b></div>
 </div>
 <h2 style="font-size:18px">Cases</h2>
 ${rows ? `<table><thead><tr><th>Vendor</th><th>Case</th><th class="n">Amount</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>` : "<p>No cases yet.</p>"}
-<p class="note">Amounts are shown per currency and are never converted or added together. &ldquo;Recovered&rdquo; is what you marked as received in Overbill; it is not verified against a bank statement. &ldquo;Possible overcharges&rdquo; are findings from automated checks that you have not confirmed. ${opts.redact ? "" : "This page contains vendor names and amounts."}</p>
+<p class="note">Amounts are shown per currency and are never converted or added together. &ldquo;Money recovered or applied&rdquo; is what you recorded in Overbill; it is not verified against a bank statement or vendor account. &ldquo;Possible overcharges&rdquo; are findings from automated checks that you have not confirmed. ${opts.redact ? "" : "This page contains vendor names and amounts."}</p>
 </body></html>`;
 }

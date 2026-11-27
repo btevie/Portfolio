@@ -1,7 +1,7 @@
 import { isCurrency } from "../currencies";
 import { isValidDecimal, MAX_INT_DIGITS } from "../audit/money";
 import { parseISO } from "../audit/normalize";
-import type { AppState, ContractRate, FindingDecision, Invoice, InvoiceLineItem, RecoveryRecord, UserSettings, Vendor } from "../types";
+import type { AppState, ContractRate, CreditEvent, CreditRecord, FindingDecision, Invoice, InvoiceLineItem, RecoveryRecord, UserSettings, Vendor } from "../types";
 import { createSeedState } from "./seed";
 
 /**
@@ -49,14 +49,19 @@ function invoice(x: unknown): x is Invoice {
     && isCurrency(x.currency) && lines(x.lineItems)
     && dec(x.subtotal) && dec(x.discounts) && dec(x.fees) && dec(x.taxAmount) && dec(x.total) && optDec(x.taxRate)
     && oneOf(x.paymentStatus, PAYMENT) && oneOf(x.source, ["demo", "upload"] as const) && Number.isFinite(x.createdAt)
-    && (x.extraction === undefined || oneOf(x.extraction, ["mock", "csv", "text", "pdf"] as const))
+    && (x.extraction === undefined || oneOf(x.extraction, ["mock", "csv", "text", "pdf", "ocr"] as const))
+    && (x.uncertainFields === undefined || (Array.isArray(x.uncertainFields) && x.uncertainFields.length <= 10 && x.uncertainFields.every((k) => str(k, 30))))
     && (x.isCredit === undefined || typeof x.isCredit === "boolean");
 }
 
 function vendor(x: unknown): x is Vendor {
   return isObj(x) && recordId(x.id) && str(x.name, 200) && x.name.trim().length > 0 && oneOf(x.category, CATEGORIES) && oneOf(x.billing, ["fixed", "variable"] as const)
     && optDec(x.expectedAmount) && (x.expectedCurrency === undefined || isCurrency(x.expectedCurrency))
-    && isObj(x.monitoring) && typeof x.monitoring.enabled === "boolean" && typeof x.monitoring.notify === "boolean";
+    && isObj(x.monitoring) && typeof x.monitoring.enabled === "boolean" && typeof x.monitoring.notify === "boolean"
+    && (x.contract === undefined || (isObj(x.contract)
+      && (x.contract.renewalDate === undefined || (typeof x.contract.renewalDate === "string" && parseISO(x.contract.renewalDate) !== null))
+      && (x.contract.noticeDays === undefined || (typeof x.contract.noticeDays === "number" && Number.isInteger(x.contract.noticeDays) && x.contract.noticeDays >= 0 && x.contract.noticeDays <= 730))
+      && (x.contract.upliftCapPct === undefined || (typeof x.contract.upliftCapPct === "string" && /^\d{1,3}(\.\d{1,2})?$/.test(x.contract.upliftCapPct)))));
 }
 
 function rate(x: unknown): x is ContractRate {
@@ -67,6 +72,54 @@ function recovery(x: unknown): x is RecoveryRecord {
   return isObj(x) && recordId(x.id) && recordId(x.vendorId) && str(x.vendorName, 200) && str(x.title, 300) && dec(x.amount) && isCurrency(x.currency)
     && oneOf(x.status, RECOVERY) && str(x.notes, 5000) && str(x.createdAt, 40) && parseISO(x.createdAt) !== null && str(x.updatedAt, 40) && parseISO(x.updatedAt) !== null
     && (x.invoiceId === undefined || recordId(x.invoiceId)) && (x.findingId === undefined || str(x.findingId, 600));
+}
+
+const EVENT_KINDS = ["opened", "note", "status", "disputed", "vendor_response", "credit_issued", "applied", "received", "correction", "next_step", "deadline", "edit", "closed", "reopened"] as const;
+const isoDate = (x: unknown): x is string => str(x, 40) && parseISO(x) !== null;
+
+/** Optional tracking fields were added after the first release. Keep valid ones, drop malformed ones, never drop the record itself. */
+export function cleanRecoveryExtras(r: RecoveryRecord): RecoveryRecord {
+  const o = r as unknown as Obj;
+  const out: Obj = { ...o };
+  for (const k of ["confirmedAmount", "recoveredAmount", "appliedAmount"]) if (k in o && !dec(o[k])) delete out[k];
+  if ("followUpDate" in o && !isoDate(o.followUpDate)) delete out.followUpDate;
+  if ("nextStep" in o && !str(o.nextStep, 300)) delete out.nextStep;
+  if ("deadline" in o) {
+    const d = o.deadline;
+    if (!(isObj(d) && isoDate(d.date) && str(d.label, 200) && str(d.source, 300))) delete out.deadline;
+  }
+  if ("events" in o) {
+    out.events = Array.isArray(o.events)
+      ? o.events.filter((e): e is Obj => isObj(e) && str(e.id, 64) && str(e.at, 40) && Number.isFinite(Date.parse(e.at)) && oneOf(e.kind, EVENT_KINDS) && str(e.text, 2000)
+          && (e.amount === undefined || dec(e.amount)) && (e.reference === undefined || str(e.reference, 200)) && (e.date === undefined || isoDate(e.date))
+          && (e.from === undefined || oneOf(e.from, RECOVERY)) && (e.to === undefined || oneOf(e.to, RECOVERY))).slice(-200)
+      : undefined;
+    if (out.events === undefined) delete out.events;
+  }
+  if ("source" in o && !oneOf(o.source, ["demo", "user"] as const)) delete out.source;
+  return out as unknown as RecoveryRecord;
+}
+
+const CREDIT_EVENTS = ["linked", "unlinked", "applied", "refunded", "reversed", "note"] as const;
+const MAX_CREDIT_EVENTS = 300;
+
+function creditEvent(x: unknown): x is CreditEvent {
+  if (!isObj(x) || !recordId(x.id) || !str(x.at, 40) || Number.isNaN(Date.parse(x.at)) || !oneOf(x.kind, CREDIT_EVENTS) || !str(x.text, 2000)) return false;
+  if (!optDec(x.amount) || (x.date !== undefined && !(str(x.date, 40) && parseISO(x.date) !== null))) return false;
+  if (x.reference !== undefined && !str(x.reference, 200)) return false;
+  if (x.invoiceId !== undefined && !recordId(x.invoiceId)) return false;
+  if (x.invoiceLabel !== undefined && !str(x.invoiceLabel, 400)) return false;
+  if (x.reverses !== undefined && !recordId(x.reverses)) return false;
+  if (x.confirmed !== undefined && typeof x.confirmed !== "boolean") return false;
+  // A settlement without an amount, date, reference and confirmation could not have been recorded by the app, so it is not trusted.
+  if ((x.kind === "applied" || x.kind === "refunded") && !(typeof x.amount === "string" && x.date && x.reference && x.confirmed === true)) return false;
+  return true;
+}
+
+function creditRecord(x: unknown): x is CreditRecord {
+  if (!isObj(x) || !recordId(x.id) || !recordId(x.creditId) || (x.relatedInvoiceId !== undefined && !recordId(x.relatedInvoiceId))) return false;
+  if (!Array.isArray(x.events) || x.events.length > MAX_CREDIT_EVENTS || !x.events.every(creditEvent)) return false;
+  return new Set(x.events.map((e: CreditEvent) => e.id)).size === x.events.length;
 }
 
 function settings(x: unknown): x is UserSettings {
@@ -129,9 +182,26 @@ export function parseStoredState(raw: string): { state: AppState; dropped: numbe
     if (!existing || item.updatedAt > existing.updatedAt) recoveryByFinding.set(item.findingId, item);
     if (existing) dropped++;
   }
-  const recoveryItems = [...unlinkedRecovery, ...recoveryByFinding.values()];
+  // Credit tracking is optional (older saves have none). Keep only records for credit notes that exist, one per credit note.
+  const creditIds = new Set(inv.items.filter((i) => i.isCredit).map((i) => i.id));
+  const billIds = new Set(inv.items.filter((i) => !i.isCredit).map((i) => i.id));
+  const rawCredits = Array.isArray(x.credits) ? x.credits : [];
+  const cr = list(rawCredits, creditRecord, MAX_RECORDS.invoices);
+  const seenCredit = new Set<string>();
+  const creditItems: CreditRecord[] = [];
+  for (const c of cr?.items ?? []) {
+    if (!creditIds.has(c.creditId) || seenCredit.has(c.creditId)) { dropped++; continue; }
+    seenCredit.add(c.creditId);
+    creditItems.push(c.relatedInvoiceId && !billIds.has(c.relatedInvoiceId) ? { ...c, relatedInvoiceId: undefined } : c);
+  }
+  dropped += cr?.dropped ?? 0;
+  const recoveryItems = [...unlinkedRecovery, ...recoveryByFinding.values()].map(cleanRecoveryExtras);
   if (isObj(x.decisions)) {
     for (const [k, v] of Object.entries(x.decisions)) { if (k !== "__proto__" && k.length <= 600 && oneOf(v, DECISIONS)) decisions[k] = v; else dropped++; }
+  }
+  const decisionReasons: Record<string, string> = {};
+  if (isObj(x.decisionReasons)) {
+    for (const [k, v] of Object.entries(x.decisionReasons)) { if (k !== "__proto__" && k in decisions && typeof v === "string" && v.length > 0 && v.length <= 500) decisionReasons[k] = v; else dropped++; }
   }
   const user = isObj(x.user) && str(x.user.id) && str(x.user.name, 200) && str(x.user.email, 320) && str(x.user.company, 200)
     ? { id: x.user.id, name: x.user.name, email: x.user.email, company: x.user.company, ...(typeof x.user.picture === "string" && validPicture(x.user.picture) ? { picture: x.user.picture } : {}) } : seed.user;
@@ -141,7 +211,7 @@ export function parseStoredState(raw: string): { state: AppState; dropped: numbe
     ? { ...x.settings, privacy: { keepUploadedFiles: false as const, analytics: x.settings.privacy.analytics } } : seed.settings;
   if (!settings(x.settings)) dropped++;
 
-  return { state: { version: 1, user, vendors: vendorItems, invoices: inv.items, contractRates: rt.items, recovery: recoveryItems, decisions, settings: s }, dropped };
+  return { state: { version: 1, user, vendors: vendorItems, invoices: inv.items, contractRates: rt.items, recovery: recoveryItems, credits: creditItems, decisions, ...(Object.keys(decisionReasons).length ? { decisionReasons } : {}), settings: s }, dropped };
 }
 
 export const LIMITS = { MAX_LINES, MAX_INT_DIGITS };
