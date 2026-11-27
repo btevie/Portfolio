@@ -1,4 +1,5 @@
-import { D, formatMoney } from "./audit/money";
+import { formatMoney } from "./audit/money";
+import { invoiceExposure } from "./data/selectors";
 import { fmtDate } from "./format";
 import type { AuditFinding, FindingDecision, Invoice } from "./types";
 
@@ -8,7 +9,7 @@ import type { AuditFinding, FindingDecision, Invoice } from "./types";
  */
 export function draftNote(invoice: Invoice, findings: AuditFinding[], decisions: Record<string, FindingDecision>, senderName: string): string {
   const confirmed = findings.some((f) => decisions[f.id] === "confirmed");
-  const total = findings.reduce((a, f) => a.plus(D(f.amountAtRisk)), D(0));
+  const total = invoiceExposure(findings, invoice.total);
   const lines = findings.map((f, i) => {
     const firm = decisions[f.id] === "confirmed";
     return [
@@ -30,6 +31,6 @@ export function draftNote(invoice: Invoice, findings: AuditFinding[], decisions:
     `Could you please ${confirmed ? "review these points and issue a corrected invoice or credit note where appropriate" : "confirm whether these are correct, and share a corrected invoice if they are not"}? I'll hold payment of the disputed amount until I hear back, and I'm happy to share my records.`,
     "",
     "Thank you,",
-    senderName,
+    senderName.trim() || "[Your name]",
   ].join("\n");
 }

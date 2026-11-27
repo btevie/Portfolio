@@ -15,9 +15,12 @@ export function D(v: Decimal.Value | null | undefined): Decimal {
   }
 }
 
+/** Max digits accepted anywhere a user or a document can supply an amount. */
+export const MAX_INT_DIGITS = 12;
+export const MAX_DECIMAL_DIGITS = 6;
+
 export function isValidDecimal(v: string): boolean {
-  if (!/^-?\d+(\.\d+)?$/.test(v.trim())) return false;
-  return true;
+  return new RegExp(`^-?\\d{1,${MAX_INT_DIGITS}}(\\.\\d{1,${MAX_DECIMAL_DIGITS}})?$`).test(v.trim());
 }
 
 export const round2 = (d: Decimal): Decimal => d.toDecimalPlaces(2, Decimal.ROUND_HALF_UP);

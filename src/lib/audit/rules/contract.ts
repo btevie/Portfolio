@@ -9,7 +9,10 @@ export const contractRateRule: Rule = (inv, ctx) => {
   const rates = ctx.contractRates.filter((r) => r.vendorId === inv.vendorId && r.currency === inv.currency);
   for (const line of inv.lineItems) {
     const desc = normalizeDescription(line.description);
-    const rate = rates.find((r) => desc.includes(normalizeDescription(r.match)));
+    const rate = rates.find((r) => {
+      const match = normalizeDescription(r.match);
+      return match.length > 0 && desc.includes(match);
+    });
     if (!rate) continue;
     const over = D(line.unitPrice).minus(D(rate.unitPrice));
     if (over.lte(D("0.005"))) continue;
@@ -21,7 +24,7 @@ export const contractRateRule: Rule = (inv, ctx) => {
       title: `Billed above your agreed rate: "${line.description}"`,
       explanation: `You recorded an agreed rate of ${m(rate.unitPrice)} per ${rate.unit}. This line bills ${m(line.unitPrice)} per ${rate.unit} for ${line.quantity} ${rate.unit}(s).`,
       expected: `${m(rate.unitPrice)} / ${rate.unit}`, actual: `${m(line.unitPrice)} / ${rate.unit}`, difference: formatMoney(over, inv.currency, { signed: true }) + ` / ${rate.unit}`,
-      evidence: [`Agreed rate (entered by you): ${rate.unitPrice} per ${rate.unit}${rate.note ? ` — ${rate.note}` : ""}`, `Invoice line: ${line.quantity} × ${line.unitPrice} = ${line.total}`, `Over-charge across the line: ${str2(overall)}`],
+      evidence: [`Agreed rate (entered by you): ${rate.unitPrice} per ${rate.unit}${rate.note ? ` (${rate.note})` : ""}`, `Invoice line: ${line.quantity} × ${line.unitPrice} = ${line.total}`, `Over-charge across the line: ${str2(overall)}`],
       confidence: "high",
       confidenceReason: "A rate you supplied is directly compared with the rate on the invoice.",
       uncertainty: "This depends on the agreed rate you entered being current and applicable to this work. A newer agreement or a different service tier may apply.",
@@ -31,7 +34,8 @@ export const contractRateRule: Rule = (inv, ctx) => {
   }
 
   const exp = ctx.vendor?.expectedAmount;
-  if (exp && D(exp).gt(0)) {
+  const expectedCurrency = ctx.vendor?.expectedCurrency ?? inv.currency;
+  if (exp && expectedCurrency === inv.currency && D(exp).gt(0)) {
     const diff = D(inv.total).minus(D(exp));
     if (diff.abs().div(D(exp)).gt("0.01")) {
       const m = (v: string) => formatMoney(v, inv.currency);

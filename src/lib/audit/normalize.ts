@@ -1,25 +1,40 @@
 const COMPANY_SUFFIX = /\b(inc|ltd|llc|bv|gmbh|co|corp|corporation|limited|plc|sa|ag)\b/g;
+const NON_ALNUM = /[^\p{L}\p{N}]+/gu;
+
+/**
+ * Identity keys must never collapse to an empty string: two unrelated vendors (or invoice numbers)
+ * written in a non-Latin script would otherwise share a key and be merged or flagged as duplicates.
+ * Unicode letters and digits are kept; if nothing survives, the trimmed, case-folded original is used.
+ */
+const keyOr = (key: string, original: string) => key || original.normalize("NFKC").trim().toLowerCase().replace(/\s+/g, " ");
 
 export function normalizeVendor(name: string): string {
-  return name
+  const key = name
+    .normalize("NFKC")
     .toLowerCase()
     .replace(/\./g, "")
     .replace(/,/g, " ")
     .replace(COMPANY_SUFFIX, " ")
-    .replace(/[^a-z0-9]+/g, " ")
+    .replace(NON_ALNUM, " ")
     .trim()
     .replace(/\s+/g, " ");
+  return keyOr(key, name);
 }
 
 /** "INV-0042", "inv 42", "#0042" and "Invoice No. 42" all normalise to "42". */
 export function normalizeInvoiceNumber(n: string): string {
-  const s = n.toLowerCase().replace(/invoice|inv|no\.?|number|#/g, "").replace(/[^a-z0-9]/g, "");
-  const stripped = s.replace(/^0+(?=\d)/, "");
-  return stripped;
+  const source = n.normalize("NFKC").trim().toLowerCase();
+  if (/^(?:[-–—]+|n\s*\/\s*a|none|null|unknown|not\s+available|not\s+applicable)$/i.test(source)) return "";
+  // Strip common printed labels only at the start. Removing these strings
+  // globally could collapse real identifiers such as "INVEST-42" and "EST-42".
+  const withoutLabel = source.replace(/^(?:(?:invoice|inv)(?=\b|\d|[:#.-])(?:\s*(?:no\.?|number))?|no\.?(?=\s|\d|[:#.-])|number(?=\s|\d|[:#.-]))\s*[:#.-]?\s*/, "");
+  const s = withoutLabel.replace(/^#+/, "").replace(NON_ALNUM, "");
+  return keyOr(s.replace(/^0+(?=\d)/, ""), n);
 }
 
 export function normalizeDescription(d: string): string {
-  return d.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
+  const key = d.normalize("NFKC").toLowerCase().replace(NON_ALNUM, " ").replace(/\s+/g, " ").trim();
+  return keyOr(key, d);
 }
 
 // ---- dates (UTC, ISO only) ----

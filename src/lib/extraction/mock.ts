@@ -20,9 +20,9 @@ export function pickScenario(fileName: string): Scenario {
 }
 
 const DATE = "2026-11-25";
-const DUE = (days: number) => new Date(Date.parse(DATE) + days * 86_400_000).toISOString().slice(0, 10);
+const dueFrom = (from: string, days: number) => new Date(Date.parse(from) + days * 86_400_000).toISOString().slice(0, 10);
 
-function make(o: { vendorName: string; number: string; terms: number; lines: [string, string, string, ("item" | "fee")?][]; totalOverride?: string; currency?: Currency }): ExtractedInvoice {
+function make(o: { date?: string; vendorName: string; number: string; terms: number; lines: [string, string, string, ("item" | "fee")?][]; totalOverride?: string; currency?: Currency }): ExtractedInvoice {
   const lines = o.lines.map(([description, quantity, unitPrice, kind = "item"]) => ({
     description, quantity, unitPrice, kind, taxRate: "21", total: str2(D(quantity).times(D(unitPrice))),
   }));
@@ -30,7 +30,7 @@ function make(o: { vendorName: string; number: string; terms: number; lines: [st
   const fees = lines.filter((l) => l.kind === "fee").reduce((a, l) => a.plus(D(l.total)), D(0));
   const tax = sub.plus(fees).times("0.21");
   return {
-    vendorName: o.vendorName, number: o.number, date: DATE, dueDate: DUE(o.terms), currency: o.currency ?? "EUR", lines,
+    vendorName: o.vendorName, number: o.number, date: o.date ?? DATE, dueDate: dueFrom(o.date ?? DATE, o.terms), currency: o.currency ?? "EUR", lines,
     subtotal: str2(sub), discounts: "0.00", fees: str2(fees), taxAmount: str2(tax), taxRate: "21",
     total: o.totalOverride ?? str2(sub.plus(fees).plus(tax)), lowConfidence: [], method: "mock-demo",
   };
@@ -46,7 +46,7 @@ export function mockExtract(fileName: string, seq: number): ExtractedInvoice {
     case "fee":
       return make({ vendorName: "Orbit Workspace", number: `OW-${n}`, terms: 15, lines: [["Dedicated desk – monthly", "1", "280.00"], ["Cleaning surcharge", "1", "12.00", "fee"]] });
     case "duplicate": // re-send of an existing November invoice
-      return make({ vendorName: "Brightline Telecom", number: "BT-88104", terms: 14, lines: [["Business fibre 500/500", "1", "49.00"], ["Static IP address", "1", "5.00", "fee"], ["Network administration fee", "1", "7.50", "fee"]] });
+      return make({ date: "2026-11-03", vendorName: "Brightline Telecom", number: "BT-88104", terms: 14, lines: [["Business fibre 500/500", "1", "49.00"], ["Static IP address", "1", "5.00", "fee"], ["Network administration fee", "1", "7.50", "fee"]] });
     default:
       return make({ vendorName: "Northwind Hosting", number: `NW-2026-${n}`, terms: 30, lines: [["Managed hosting – Pro plan", "1", "138.00"]] });
   }
