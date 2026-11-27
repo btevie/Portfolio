@@ -22,8 +22,9 @@ export const RULES: (AuditRule & { run: Rule })[] = [
 
 export const RULE_META: AuditRule[] = RULES.map(({ id, name, description }) => ({ id, name, description }));
 
-export function configFromSettings(s: Pick<UserSettings, "sensitivity" | "disabledRules">): AuditConfig {
-  return { ...DEFAULT_CONFIG, sensitivityScale: SENSITIVITY_SCALE[s.sensitivity], disabledRules: s.disabledRules };
+export function configFromSettings(s: Pick<UserSettings, "sensitivity" | "disabledRules"> & Partial<Pick<UserSettings, "thresholds" | "tolerance">>): AuditConfig {
+  const scale = s.sensitivity === "custom" ? 1 : SENSITIVITY_SCALE[s.sensitivity];
+  return { ...DEFAULT_CONFIG, ...(s.thresholds ? { thresholds: s.thresholds } : {}), ...(s.tolerance ? { roundingTolerance: s.tolerance } : {}), sensitivityScale: scale, disabledRules: s.disabledRules };
 }
 
 const SEV = { high: 0, medium: 1, low: 2 } as const;

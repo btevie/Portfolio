@@ -1,4 +1,5 @@
 "use client";
+import { SelectMenu } from "@/components/ui/select-menu";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { Plus, Store, Trash2 } from "lucide-react";
@@ -8,7 +9,8 @@ import { detectRecurring } from "@/lib/data/selectors";
 import { actions } from "@/lib/data/store";
 import { fmtDate } from "@/lib/format";
 import type { VendorCategory } from "@/lib/types";
-import { Button, Card, ClassBadge, EmptyState, Field, fieldClass, LinkButton, PageHeader, Pill, SectionHeader, Toggle } from "@/components/ui";
+import { cn } from "@/lib/cn";
+import { Button, Card, ClassBadge, Disclosure, EmptyState, Field, fieldClass, LinkButton, MotionRow, PageHeader, Pill, SectionHeader, Toggle } from "@/components/ui";
 import { LineChart } from "@/components/charts";
 import { statusTone } from "@/components/vendor-list";
 
@@ -26,6 +28,7 @@ export function VendorDetail({ id }: { id: string }) {
   if (!s) return <Card><EmptyState icon={Store} title="Vendor not found" action={<LinkButton href="/vendors">Back to vendors</LinkButton>}>It may have been removed when demo data was reset.</EmptyState></Card>;
   const { vendor } = s;
   const cur = s.latest?.currency ?? state.settings.currency;
+  const expectedCur = vendor.expectedCurrency ?? cur;
   const m = (v: string | number) => formatMoney(v, cur);
   const rates = state.contractRates.filter((r) => r.vendorId === vendor.id);
   const expectedValue = expected ?? vendor.expectedAmount ?? "";
@@ -35,7 +38,7 @@ export function VendorDetail({ id }: { id: string }) {
   function saveExpected() {
     const v = expectedValue.trim();
     if (v && (!isValidDecimal(v) || D(v).lte(0))) { setSaved("Enter a positive amount, e.g. 120.00"); return; }
-    actions.updateVendor(vendor.id, { expectedAmount: v ? D(v).toFixed(2) : undefined });
+    actions.updateVendor(vendor.id, { expectedAmount: v ? D(v).toFixed(2) : undefined, expectedCurrency: v ? expectedCur : undefined });
     setExpected(null); setSaved(v ? "Expected amount saved." : "Expected amount cleared.");
   }
 
@@ -48,21 +51,21 @@ export function VendorDetail({ id }: { id: string }) {
 
   return (
     <>
-      <p className="mb-3 text-sm"><Link href="/vendors" className="text-muted hover:text-ink hover:underline">← Vendors</Link></p>
-      <PageHeader title={vendor.name} description={`${vendor.category} · ${vendor.billing === "variable" ? "Usage-based billing — wider tolerances apply" : "Fixed recurring billing"}`} actions={<Pill tone={statusTone(s.status)}>{s.status}</Pill>} />
+      <p className="mb-1 text-sm"><Link href="/vendors" className="-ml-2 inline-flex min-h-11 items-center rounded-md px-2 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">← Vendors</Link></p>
+      <PageHeader title={vendor.name} description={`${vendor.category} · ${vendor.billing === "variable" ? "Usage-based billing, wider tolerances apply" : "Fixed recurring billing"}`} actions={<Pill tone={statusTone(s.status)}>{s.status}</Pill>} />
 
-      <section aria-label="Vendor figures" className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <section aria-label="Vendor figures" className="mb-5 grid grid-cols-2 divide-x divide-line overflow-hidden rounded-2xl bg-card ring-1 ring-line lg:grid-cols-4">
         {[["Invoices", String(s.invoiceCount)], ["Average charge", s.average ? m(s.average.toFixed(2)) : "—"], ["Latest charge", s.latest ? m(s.latest.total) : "—"], ["Change", s.changePct === null ? "—" : `${s.changePct > 0 ? "+" : ""}${s.changePct}%`]].map(([k, v]) => (
-          <Card key={k} className="p-4"><p className="text-[13px] text-muted">{k}</p><p className="num mt-1.5 text-xl font-semibold">{v}</p></Card>
+          <div key={k} className={cn("px-4 py-3", (k === "Invoices" || k === "Average charge") && "max-sm:hidden")}><p className="text-xs text-muted-foreground">{k}</p><p className="num mt-0.5 text-xl font-semibold tracking-tight">{v}</p></div>
         ))}
       </section>
 
-      <div className="grid gap-6 lg:grid-cols-[1.5fr_1fr]">
-        <div className="space-y-6">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
+        <div className="min-w-0 space-y-6">
           <Card>
-            <SectionHeader title="Price history" description="Total charged per invoice. Dashed line is the average. Amber points have findings." />
+            <SectionHeader title="Price history" description="Total per invoice. Dashed line is the average." />
             <div className="px-5 pt-3 pb-4">
-              {s.unique.length < 2 ? <EmptyState icon={Store} title="Not enough history">We don&apos;t have enough invoice history to establish a reliable baseline yet. Upload more invoices from this vendor to improve monitoring.</EmptyState>
+              {s.unique.length < 2 ? <EmptyState icon={Store} title="Not enough history">Not enough history yet. Upload more invoices from this vendor.</EmptyState>
                 : <LineChart points={points} average={avg} currency={cur} ariaLabel={`${vendor.name} invoice totals: ${points.map((p) => `${p.label} ${p.value}`).join(", ")}`} />}
             </div>
           </Card>
@@ -70,49 +73,47 @@ export function VendorDetail({ id }: { id: string }) {
           <Card>
             <SectionHeader title="Invoice history" />
             <div className="overflow-x-auto"><table className="w-full min-w-[520px] text-sm">
-              <thead className="border-b border-line text-left text-xs text-muted"><tr><th scope="col" className="px-5 py-2.5 font-medium">Invoice</th><th scope="col" className="px-3 py-2.5 font-medium">Date</th><th scope="col" className="px-3 py-2.5 text-right font-medium">Total</th><th scope="col" className="px-5 py-2.5 font-medium">Result</th></tr></thead>
-              <tbody className="divide-y divide-line">{s.invoices.map((i) => (
-                <tr key={i.id} className="hover:bg-canvas"><td className="px-5 py-2.5 font-medium"><Link href={`/invoices/${i.id}`} className="hover:underline">{i.number}</Link></td><td className="px-3 py-2.5 text-muted">{fmtDate(i.date)}</td><td className="num px-3 py-2.5 text-right">{m(i.total)}</td><td className="px-5 py-2.5"><ClassBadge value={audits[i.id]?.classification ?? "CLEAR"} size="sm" /></td></tr>
+              <thead className="border-b border-line-strong bg-canvas/60 text-left text-xs tracking-wider text-muted-foreground "><tr><th scope="col" className="px-5 py-2.5 font-medium">Invoice</th><th scope="col" className="px-3 py-2.5 font-medium">Date</th><th scope="col" className="px-3 py-2.5 text-right font-medium">Total</th><th scope="col" className="px-5 py-2.5 font-medium">Result</th></tr></thead>
+              <tbody className="divide-y divide-line">{s.invoices.map((i, n) => (
+                <MotionRow key={i.id} i={n} className="hover:bg-canvas"><td className="px-5 py-2.5 font-medium"><Link href={`/invoices/${i.id}`} className="-my-3 inline-block py-3 hover:underline">{i.number}</Link></td><td className="px-3 py-2.5 text-muted-foreground">{fmtDate(i.date)}</td><td className="num px-3 py-2.5 text-right">{m(i.total)}</td><td className="px-5 py-2.5"><ClassBadge value={audits[i.id]?.classification ?? "CLEAR"} size="sm" /></td></MotionRow>
               ))}</tbody>
             </table></div>
           </Card>
         </div>
 
-        <div className="space-y-6">
+        <div className="min-w-0 space-y-6">
           <Card>
             <SectionHeader title="Recurring charges" />
             <div className="px-5 py-4 text-sm">
               {recurring ? <p>Looks like a <strong>monthly</strong> charge of <strong className="num">{m(recurring.monthly.toFixed(2))}</strong>. Next invoice expected around <strong>{fmtDate(recurring.nextExpected)}</strong>.</p>
-                : <p className="text-muted">No regular monthly pattern detected{vendor.billing === "variable" ? " — expected for usage-based billing" : ""}.</p>}
+                : <p className="text-muted-foreground">No regular monthly pattern detected{vendor.billing === "variable" ? " (normal for usage-based billing)" : ""}.</p>}
             </div>
           </Card>
 
           <Card>
             <SectionHeader title="Detected anomalies" description="Anomalies are not confirmed errors." />
-            {s.openFindings.length === 0 ? <p className="px-5 py-4 text-sm text-muted">Everything looks consistent. We&apos;ll keep watching for changes.</p> : (
+            {s.openFindings.length === 0 ? <p className="px-5 py-4 text-sm text-muted-foreground">Nothing flagged. That is not a guarantee.</p> : (
               <ul className="divide-y divide-line">{s.openFindings.map((f) => (
-                <li key={f.id}><Link href={`/invoices/${f.invoiceId}?finding=${encodeURIComponent(f.id)}`} className="block px-5 py-3 hover:bg-canvas"><p className="text-sm font-medium">{f.title}</p><p className="mt-0.5 text-xs text-muted">{f.actual} vs expected {f.expected}</p></Link></li>
+                <li key={f.id}><Link href={`/invoices/${f.invoiceId}?finding=${encodeURIComponent(f.id)}`} className="block px-5 py-3 hover:bg-canvas"><p className="text-sm font-medium">{f.title}</p><p className="mt-0.5 text-xs text-muted-foreground">{f.actual} vs expected {f.expected}</p></Link></li>
               ))}</ul>
             )}
           </Card>
 
-          <Card>
-            <SectionHeader title="What you expect to pay" description="Optional. Used to flag totals that differ by more than 1%." />
+          <Disclosure title="What you expect to pay">
             <div className="space-y-3 px-5 py-4">
-              <Field label={`Expected invoice total (${cur})`} htmlFor="expected" hint={vendor.expectedAmount ? `Currently ${m(vendor.expectedAmount)}` : "Not set"}>
+              <Field label={`Expected invoice total (${expectedCur})`} htmlFor="expected" hint={vendor.expectedAmount ? `Currently ${formatMoney(vendor.expectedAmount, expectedCur)}` : "Not set"}>
                 <div className="flex gap-2"><input id="expected" inputMode="decimal" className={fieldClass} value={expectedValue} onChange={(e) => { setExpected(e.target.value); setSaved(""); }} placeholder="e.g. 145.20" /><Button onClick={saveExpected}>Save</Button></div>
               </Field>
-              <p role="status" className="min-h-4 text-xs text-muted">{saved}</p>
+              <p role="status" className="min-h-4 text-xs text-muted-foreground">{saved}</p>
             </div>
-          </Card>
+          </Disclosure>
 
-          <Card>
-            <SectionHeader title="Agreed contract rates" description="A line billed above one of these is a likely error." />
+          <Disclosure title="Agreed contract rates">
             <ul className="divide-y divide-line">{rates.map((r) => (
-              <li key={r.id} className="flex items-center justify-between gap-3 px-5 py-3 text-sm"><span>“{r.match}” — <strong className="num">{formatMoney(r.unitPrice, r.currency)}</strong> / {r.unit}{r.note && <span className="block text-xs text-muted">{r.note}</span>}</span>
-                <button type="button" aria-label={`Remove rate ${r.match}`} onClick={() => actions.removeContractRate(r.id)} className="cursor-pointer rounded-md p-1.5 text-muted hover:bg-canvas hover:text-bad"><Trash2 className="size-4" /></button></li>
+              <li key={r.id} className="flex items-center justify-between gap-3 px-5 py-3 text-sm"><span>“{r.match}”: <strong className="num">{formatMoney(r.unitPrice, r.currency)}</strong> / {r.unit}{r.note && <span className="block text-xs text-muted-foreground">{r.note}</span>}</span>
+                <button type="button" aria-label={`Remove rate ${r.match}`} onClick={() => actions.removeContractRate(r.id)} className="cursor-pointer rounded-md p-1.5 text-muted-foreground hover:bg-canvas hover:text-bad"><Trash2 className="size-4" /></button></li>
             ))}</ul>
-            {rates.length === 0 && <p className="px-5 pt-4 text-sm text-muted">No agreed rates recorded for this vendor.</p>}
+            {rates.length === 0 && <p className="px-5 pt-4 text-sm text-muted-foreground">No agreed rates recorded for this vendor.</p>}
             <form onSubmit={addRate} className="grid grid-cols-[1fr_90px_80px] gap-2 px-5 py-4">
               <input aria-label="Line description keyword" placeholder="Keyword (e.g. consulting)" className={fieldClass} value={rate.match} onChange={(e) => setRate({ ...rate, match: e.target.value })} />
               <input aria-label="Agreed unit price" inputMode="decimal" placeholder="Rate" className={fieldClass} value={rate.unitPrice} onChange={(e) => setRate({ ...rate, unitPrice: e.target.value })} />
@@ -120,17 +121,16 @@ export function VendorDetail({ id }: { id: string }) {
               <Button variant="secondary" size="sm" className="col-span-3 justify-self-start" onClick={(e) => (e.currentTarget.form as HTMLFormElement).requestSubmit()}><Plus className="size-3.5" aria-hidden />Add rate</Button>
               {rateErr && <p role="alert" className="col-span-3 text-xs text-bad">{rateErr}</p>}
             </form>
-          </Card>
+          </Disclosure>
 
-          <Card>
-            <SectionHeader title="Monitoring" />
+          <Disclosure title="Monitoring">
             <div className="divide-y divide-line px-5">
-              <Toggle id="mon-enabled" label="Monitor this vendor" description="Include in alerts and price-change tracking." checked={vendor.monitoring.enabled} onChange={(v) => actions.updateVendor(vendor.id, { monitoring: { ...vendor.monitoring, enabled: v } })} />
-              <Toggle id="mon-notify" label="Notify me of anomalies" checked={vendor.monitoring.notify} onChange={(v) => actions.updateVendor(vendor.id, { monitoring: { ...vendor.monitoring, notify: v } })} />
-              <Toggle id="mon-variable" label="Usage-based billing" description="Charges legitimately vary; thresholds are widened 3×." checked={vendor.billing === "variable"} onChange={(v) => actions.updateVendor(vendor.id, { billing: v ? "variable" : "fixed" })} />
-              <div className="py-3"><label htmlFor="mon-cat" className="mb-1.5 block text-sm font-medium">Category</label><select id="mon-cat" className={fieldClass} value={vendor.category} onChange={(e) => actions.updateVendor(vendor.id, { category: e.target.value as VendorCategory })}>{CATEGORIES.map((c) => <option key={c}>{c}</option>)}</select></div>
+              <Toggle id="mon-enabled" label="Monitor this vendor" description="Include price changes in Dashboard trend alerts. Existing invoice findings stay visible." checked={vendor.monitoring.enabled} onChange={(v) => actions.updateVendor(vendor.id, { monitoring: { ...vendor.monitoring, enabled: v } })} />
+              <Toggle id="mon-notify" label="Notify me of anomalies" description="Show this vendor’s review and due-date reminders in the notification bell." checked={vendor.monitoring.notify} onChange={(v) => actions.updateVendor(vendor.id, { monitoring: { ...vendor.monitoring, notify: v } })} />
+              <Toggle id="mon-variable" label="Usage-based billing" description="Charges vary; thresholds are widened 3×." checked={vendor.billing === "variable"} onChange={(v) => actions.updateVendor(vendor.id, { billing: v ? "variable" : "fixed" })} />
+              <div className="py-3"><label htmlFor="mon-cat" className="mb-1.5 block text-sm font-medium">Category</label><SelectMenu id="mon-cat" label="Category" value={vendor.category} onChange={(v) => actions.updateVendor(vendor.id, { category: v as VendorCategory })} options={CATEGORIES.map((c) => ({ value: c, label: c }))} /></div>
             </div>
-          </Card>
+          </Disclosure>
         </div>
       </div>
     </>

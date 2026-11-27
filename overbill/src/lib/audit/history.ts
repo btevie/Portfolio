@@ -1,7 +1,18 @@
 import type { Invoice } from "../types";
-import { normalizeInvoiceNumber, normalizeVendor, parseISO, subtractMonths } from "./normalize";
+import { daysBetween, normalizeInvoiceNumber, normalizeVendor, parseISO, subtractMonths } from "./normalize";
 import { D, Decimal, pct, round2, str2, sum } from "./money";
 import type { AuditContext, HistoricalComparison } from "./types";
+
+export const DUPLICATE_COPY_WINDOW_DAYS = 5;
+
+/** Two records are confidently the same invoice copy only when number, total and dates align. */
+export function isDuplicateCopy(a: Invoice, b: Invoice): boolean {
+  const number = normalizeInvoiceNumber(a.number);
+  if (!number || normalizeInvoiceNumber(b.number) !== number || normalizeVendor(a.vendorName) !== normalizeVendor(b.vendorName)
+    || a.currency !== b.currency || !D(a.total).eq(D(b.total))) return false;
+  const aDate = parseISO(a.date), bDate = parseISO(b.date);
+  return aDate !== null && bDate !== null && Math.abs(daysBetween(aDate, bDate)) <= DUPLICATE_COPY_WINDOW_DAYS;
+}
 
 /**
  * Net pricing: what the vendor charged before fees and tax, rebuilt from quantity × unit price so an
@@ -13,21 +24,33 @@ export const netOf = (i: Invoice): Decimal =>
 export function isEarlier(other: Invoice, inv: Invoice): boolean {
   const a = parseISO(other.date), b = parseISO(inv.date);
   if (a !== null && b !== null && a !== b) return a < b;
-  return other.createdAt < inv.createdAt;
+  return other.createdAt < inv.createdAt || (other.createdAt === inv.createdAt && other.id < inv.id);
 }
 
-/** Prior invoices from the same vendor, oldest → newest, with re-sent duplicates counted once. */
+/** Prior invoices from the same vendor *in the same currency* (amounts are never compared across currencies), oldest → newest, with re-sent duplicates counted once. */
 export function priorInvoices(inv: Invoice, ctx: AuditContext): Invoice[] {
   const vendor = normalizeVendor(inv.vendorName);
-  const seen = new Set<string>();
+  const seen = new Map<string, Invoice[]>();
   const out: Invoice[] = [];
   const candidates = ctx.invoices
-    .filter((o) => o.id !== inv.id && normalizeVendor(o.vendorName) === vendor && isEarlier(o, inv))
-    .sort((a, b) => (parseISO(a.date) ?? 0) - (parseISO(b.date) ?? 0) || a.createdAt - b.createdAt);
+    .filter((o) => o.id !== inv.id && normalizeVendor(o.vendorName) === vendor && o.currency === inv.currency && isEarlier(o, inv))
+    .sort((a, b) => (parseISO(a.date) ?? 0) - (parseISO(b.date) ?? 0) || a.createdAt - b.createdAt || a.id.localeCompare(b.id));
   for (const o of candidates) {
-    const key = normalizeInvoiceNumber(o.number);
-    if (seen.has(key)) continue;
-    seen.add(key);
+    const number = normalizeInvoiceNumber(o.number);
+    // A blank or unreadable number cannot prove that two invoices are copies.
+    if (number) {
+      const copies = seen.get(number) ?? [];
+      const duplicateIndex = copies.findIndex((prior) => isDuplicateCopy(prior, o));
+      if (duplicateIndex >= 0) {
+        const old = copies[duplicateIndex];
+        const outputIndex = out.indexOf(old);
+        if (outputIndex >= 0) out[outputIndex] = o;
+        copies[duplicateIndex] = o;
+        continue;
+      }
+      copies.push(o);
+      seen.set(number, copies);
+    }
     out.push(o);
   }
   return out;
