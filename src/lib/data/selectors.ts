@@ -3,7 +3,7 @@ import { isSimulated } from "../evidence";
 import { auditInvoice, configFromSettings, RULES } from "../audit/engine";
 import { D, Decimal, pct, sum } from "../audit/money";
 import { isDuplicateCopy, netOf } from "../audit/history";
-import { daysBetween, normalizeInvoiceNumber, parseISO } from "../audit/normalize";
+import { daysBetween, normalizeDescription, normalizeInvoiceNumber, parseISO } from "../audit/normalize";
 import type { AuditResult } from "../audit/types";
 import type { AppState, AuditFinding, Classification, Currency, Invoice, RecoveryRecord, Vendor } from "../types";
 
@@ -38,19 +38,51 @@ export function auditAll(state: AppState): Audits {
 
 const RESOLVED = new Set(["recovered", "credit_issued", "dismissed"]);
 
-/** A finding is "open" until the user dismisses it or its recovery record is resolved. */
-export function isOpen(state: AppState, f: AuditFinding): boolean {
+/** Signature for recurring vendor fee patterns so dismissing an agreed fee suppresses future repeats for that vendor. */
+function feeSignature(state: AppState, f: AuditFinding): string | null {
+  if (f.ruleId !== "unexpected_fee") return null;
+  const vendorId = state.invoices.find((i) => i.id === f.invoiceId)?.vendorId ?? f.invoiceId;
+  const label = f.title.split(":")[0] ?? f.title;
+  return `${vendorId}::${f.ruleId}::${normalizeDescription(label)}::${normalizeDescription(f.actual)}`;
+}
+
+function dismissedFeeSignatures(state: AppState, audits?: Audits): Set<string> {
+  const sigs = new Set<string>();
+  if (!audits) return sigs;
+  for (const res of Object.values(audits)) {
+    for (const f of res.findings) {
+      if (state.decisions[f.id] === "dismissed") {
+        const sig = feeSignature(state, f);
+        if (sig) sigs.add(sig);
+      }
+    }
+  }
+  return sigs;
+}
+
+/** A finding is "open" until the user dismisses it, its recovery record is resolved, or the user already dismissed the exact same fee pattern for this vendor. */
+export function isOpen(state: AppState, f: AuditFinding, audits?: Audits): boolean {
   if (state.decisions[f.id] === "dismissed") return false;
   const rec = state.recovery.find((r) => r.findingId === f.id);
-  return !(rec && RESOLVED.has(rec.status));
+  if (rec && RESOLVED.has(rec.status)) return false;
+  if (audits) {
+    const sig = feeSignature(state, f);
+    if (sig && dismissedFeeSignatures(state, audits).has(sig)) return false;
+  }
+  return true;
 }
 
 export function openFindings(state: AppState, audits: Audits): AuditFinding[] {
-  return Object.values(audits).flatMap((a) => a.findings).filter((f) => isOpen(state, f));
+  const dismissedSigs = dismissedFeeSignatures(state, audits);
+  return Object.values(audits).flatMap((a) => a.findings).filter((f) => {
+    if (!isOpen(state, f)) return false;
+    const sig = feeSignature(state, f);
+    return !(sig && dismissedSigs.has(sig));
+  });
 }
 
-export function effectiveClassification(state: AppState, a: AuditResult): Classification {
-  const open = a.findings.filter((f) => isOpen(state, f));
+export function effectiveClassification(state: AppState, a: AuditResult, audits?: Audits): Classification {
+  const open = a.findings.filter((f) => isOpen(state, f, audits));
   if (open.some((f) => f.classification === "LIKELY_ERROR")) return "LIKELY_ERROR";
   return open.length ? "REVIEW_NEEDED" : "CLEAR";
 }
