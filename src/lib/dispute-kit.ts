@@ -58,6 +58,9 @@ export interface DisputeKit {
 }
 
 function trapSpecificGuidance(f: AuditFinding): string | null {
+  if (f.id.includes("nl-bik-staffel") || f.id.includes("nl-wki-cumulation")) {
+    return "Under Dutch law (Besluit vergoeding voor buitengerechtelijke incassokosten, Art. 6:96 BW, and the Wet kwaliteit incassodiensten / WKI), collection fees are strictly capped by the statutory sliding scale, require a valid prior 14-dagenbrief, and are subject to cumulative installment caps.";
+  }
   if (f.id.includes("cpi-excess")) {
     return "Under Dutch and EU commercial practice, standard annual indexation clauses follow official CBS CPI / EU HICP inflation rates rather than discretionary surcharges above inflation.";
   }
