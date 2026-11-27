@@ -1,4 +1,5 @@
 "use client";
+import { parseContractText } from "@/lib/audit/contract-parser";
 import { SelectMenu } from "@/components/ui/select-menu";
 import Link from "next/link";
 import { useMemo, useState } from "react";
@@ -147,6 +148,15 @@ function ContractCard({ vendor }: { vendor: Vendor }) {
   const [notice, setNotice] = useState(c?.noticeDays !== undefined ? String(c.noticeDays) : "");
   const [cap, setCap] = useState(c?.upliftCapPct ?? "");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [quoteText, setQuoteText] = useState("");
+  function extractFromQuote() {
+    const parsed = parseContractText(quoteText);
+    if (!parsed.matchedNotes.length) return setMsg({ ok: false, text: "No renewal date, notice period, or % cap detected in that text." });
+    if (parsed.renewalDate) setRenewal(parsed.renewalDate);
+    if (parsed.noticeDays !== undefined) setNotice(String(parsed.noticeDays));
+    if (parsed.upliftCapPct) setCap(parsed.upliftCapPct);
+    setMsg({ ok: true, text: `Auto-filled from text (${parsed.matchedNotes.join(" · ")}). Click Save to apply.` });
+  }
 
   function save(e: React.FormEvent) {
     e.preventDefault();
@@ -160,6 +170,13 @@ function ContractCard({ vendor }: { vendor: Vendor }) {
 
   return (
     <Disclosure title="Contract & renewal" subtitle="Optional: a price cap and a renewal date">
+      <div className="mb-3 rounded-xl border border-border bg-muted/40 p-3">
+        <label className="block text-xs font-medium text-muted-foreground">Auto-fill from pasted quote or contract text (NL/EN)</label>
+        <div className="mt-1.5 flex flex-col gap-2 sm:flex-row">
+          <input type="text" placeholder="e.g. Verlenging 01-04-2027, opzegtermijn 1 maand, max 3% indexatie" className={fieldClass} value={quoteText} onChange={(e) => setQuoteText(e.target.value)} />
+          <Button type="button" variant="secondary" size="sm" onClick={extractFromQuote}>Extract terms</Button>
+        </div>
+      </div>
       <form onSubmit={save} className="grid gap-3 sm:grid-cols-3">
         <label className="text-sm font-medium">Renewal date<input type="date" className={`${fieldClass} mt-1.5`} value={renewal} onChange={(e) => setRenewal(e.target.value)} /></label>
         <label className="text-sm font-medium">Notice needed (days)<input inputMode="numeric" placeholder="e.g. 30" className={`${fieldClass} mt-1.5`} value={notice} onChange={(e) => setNotice(e.target.value)} /></label>
