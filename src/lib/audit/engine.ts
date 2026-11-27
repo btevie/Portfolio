@@ -1,3 +1,4 @@
+import { reconcileMathFindings } from "./reconcile-math";
 import { vendorGraphFindings } from "./vendor-graph";
 import { forecastAnomalyFindings } from "./forecasting";
 import { inflationIndexFindings } from "./inflation-index";
@@ -41,7 +42,7 @@ export function classify(findings: AuditFinding[]): Classification {
 /** Pure, deterministic audit. No I/O, no LLM, no floating point money. */
 export function auditInvoice(invoice: Invoice, ctx: AuditContext): AuditResult {
   const active = RULES.filter((r) => !ctx.config.disabledRules.includes(r.id as RuleId));
-  const forensic = [...forensicAuditFindings(invoice, ctx), ...inflationIndexFindings(invoice, ctx), ...forecastAnomalyFindings(invoice, ctx), ...vendorGraphFindings(invoice, ctx)].filter((f) => !ctx.config.disabledRules.includes(f.ruleId));
+  const forensic = [...forensicAuditFindings(invoice, ctx), ...inflationIndexFindings(invoice, ctx), ...forecastAnomalyFindings(invoice, ctx), ...vendorGraphFindings(invoice, ctx), ...reconcileMathFindings(invoice)].filter((f) => !ctx.config.disabledRules.includes(f.ruleId));
   const findings = [...active.flatMap((r) => r.run(invoice, ctx)), ...forensic]
     .sort((a, b) => (a.classification === b.classification ? 0 : a.classification === "LIKELY_ERROR" ? -1 : 1) || SEV[a.severity] - SEV[b.severity]);
   return {
