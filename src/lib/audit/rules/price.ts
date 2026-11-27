@@ -43,15 +43,20 @@ export const priceHistoryRule: Rule = (inv, ctx) => {
   const priorNets = priorInvoices(inv, ctx).map(netOf);
   const base = D(cmp.previous ?? cmp.baseline);
   const stable = priorNets.length >= 3 && priorNets.every((n) => n.minus(base).abs().div(base.isZero() ? 1 : base).lt(0.01));
+  const promoExpired = !variable && stable && pctDiff.gte(15);
   const confidence = !variable && stable ? "high" : !variable && cmp.sampleSize >= 3 ? "medium" : "low";
   const diff = D(cmp.absDiff!);
   const taxFactor = weightedTaxFactor(inv.lineItems.filter((line) => line.kind === "item"), inv.taxRate);
 
   return [makeFinding(inv, {
-    ruleId: "price_history", key: "increase",
+    ruleId: "price_history", key: promoExpired ? "promo-expired" : "increase",
     classification: "REVIEW_NEEDED", severity,
-    title: `Charge is ${cmp.pctDiff}% higher than your usual with ${inv.vendorName}`,
-    explanation: `The net charge is ${m(cmp.current)} against a ${cmp.baselineLabel} of ${m(cmp.baseline)} (${formatMoney(diff, inv.currency, { signed: true })}). This is an anomaly, not proof of an error. Vendors do raise prices.`,
+    title: promoExpired
+      ? `Possible expired promo or contract rollover (+${cmp.pctDiff}%) with ${inv.vendorName}`
+      : `Charge is ${cmp.pctDiff}% higher than your usual with ${inv.vendorName}`,
+    explanation: promoExpired
+      ? `After ${cmp.sampleSize} identical bills of ${m(cmp.baseline)}, ${inv.vendorName} jumped to ${m(cmp.current)} (${formatMoney(diff, inv.currency, { signed: true })}). This pattern commonly happens when an introductory discount (welkomstkorting) or fixed-rate term expires.`
+      : `The net charge is ${m(cmp.current)} against a ${cmp.baselineLabel} of ${m(cmp.baseline)} (${formatMoney(diff, inv.currency, { signed: true })}). This is an anomaly, not proof of an error. Vendors do raise prices.`,
     expected: m(cmp.baseline), actual: m(cmp.current), difference: formatMoney(diff, inv.currency, { signed: true }),
     evidence: [
       `${cmp.sampleSize} earlier invoices from this vendor`,
@@ -64,8 +69,12 @@ export const priceHistoryRule: Rule = (inv, ctx) => {
       : variable
         ? "Low confidence: this vendor bills by usage, so month-to-month swings are normal and the baseline is noisy."
         : "Medium confidence: the baseline is real but short or slightly uneven.",
-    uncertainty: "The vendor may have changed their pricing, added seats or services, or applied an indexation clause. Medium confidence at most that this is an error.",
-    recommendedAction: "Check whether you were notified of a price change or changed your plan. If not, ask the vendor to explain the increase.",
+    uncertainty: promoExpired
+      ? "The jump may reflect an expired welcome discount, a scheduled annual indexation, or an upgraded plan tier."
+      : "The vendor may have changed their pricing, added seats or services, or applied an indexation clause. Medium confidence at most that this is an error.",
+    recommendedAction: promoExpired
+      ? "If an introductory discount or fixed contract just ended, your minimum lock-in period is likely over—contact the provider for a retention discount or switch plans."
+      : "Check whether you were notified of a price change or changed your plan. If not, ask the vendor to explain the increase.",
     amountAtRisk: str2(diff.times(1 + taxFactor)),
   })];
 };
