@@ -40,7 +40,7 @@ export function PayRun() {
     const rows = unpaid.map((invoice) => {
       const a = audits[invoice.id];
       const open = a ? a.findings.filter((f) => isOpen(state, f)) : [];
-      return { invoice, open, exposure: invoiceExposure(open, invoice.total), cls: a ? effectiveClassification(state, a) : "REVIEW_NEEDED" as const }; // no audit yet: hold it, never treat an unchecked invoice as clear
+      return { invoice, open, exposure: invoiceExposure(open, invoice.total), cls: invoice.medical || !a ? "REVIEW_NEEDED" as const : effectiveClassification(state, a) }; // medical bills are never "clear to pay" automatically // no audit yet: hold it, never treat an unchecked invoice as clear
     });
     return { ready: rows.filter((r) => r.cls === "CLEAR"), hold: rows.filter((r) => r.cls !== "CLEAR") };
   }, [state, audits]);
@@ -90,7 +90,7 @@ export function PayRun() {
       <header className="mb-4 sm:mb-6">
         <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Pay run</h1>
         <p className="mt-1 text-sm text-muted-foreground">Before you pay this batch: what is clear, and what to hold.</p>
-        <p className="mt-2 text-sm"><Link href="/payments" className="font-medium text-primary hover:underline">Check a bank statement for double payments</Link></p>
+        <p className="mt-2 text-sm"><Link href="/payments" className="inline-flex min-h-11 items-center font-medium text-primary hover:underline">Check a bank statement for double payments</Link></p>
         <p className="mt-1 text-sm"><button type="button" onClick={exportCalendar} className="cursor-pointer font-medium text-primary hover:underline">Add due dates to your calendar (.ics)</button></p>
       </header>
 
@@ -115,8 +115,8 @@ export function PayRun() {
               return (
                 <motion.li key={i.id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(k, 8) * 0.03, duration: 0.25 }}>
                   <Link href={`/invoices/${i.id}`} className="flex min-h-16 items-center justify-between gap-3 rounded-2xl bg-card px-4 py-3 ring-1 ring-border transition-transform active:scale-[0.98]">
-                    <div className="min-w-0"><p className="truncate text-sm font-semibold">{i.vendorName}</p><p className="truncate text-xs text-muted-foreground">{open[0]?.title ?? i.number}</p><p className={cn("text-xs font-medium", due.late ? "text-bad" : "text-muted-foreground")}>{due.text}</p></div>
-                    <div className="shrink-0 text-right"><p className="num text-sm font-semibold">{formatMoney(i.total, i.currency)}</p><p className="num text-xs font-medium text-warn">{formatMoney(exposure, i.currency)} possible overcharge</p></div>
+                    <div className="min-w-0"><p className="truncate text-sm font-semibold">{i.vendorName}</p><p className="truncate text-xs text-muted-foreground">{open[0]?.title ?? (i.medical ? "Medical bill: compare with your insurer's statement first" : i.number)}</p><p className={cn("text-xs font-medium", due.late ? "text-bad" : "text-muted-foreground")}>{due.text}</p></div>
+                    <div className="shrink-0 text-right"><p className="num text-sm font-semibold">{formatMoney(i.total, i.currency)}</p>{exposure.gt(0) && <p className="num text-xs font-medium text-warn">{formatMoney(exposure, i.currency)} possible overcharge</p>}</div>
                   </Link>
                 </motion.li>
               );

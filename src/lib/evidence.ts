@@ -1,5 +1,6 @@
 import type { AuditFinding, Invoice, RuleId } from "./types";
 import { RULE_META } from "./audit/engine";
+import { MEDICAL_VERIFY_FIRST } from "./medical";
 
 /**
  * Presentation-only helpers. They never change what the audit rules find: they explain, for one finding, what was
@@ -164,6 +165,7 @@ export function findingGuide(f: AuditFinding, inv: Invoice): FindingGuide {
   const readingNotes: string[] = [];
   if (!info.fromYourDocument && info.kind === "simulated") readingNotes.push(info.detail);
   else if (info.kind !== "sample") readingNotes.push(info.detail);
+  for (const n of inv.readNotes ?? []) readingNotes.push(n);
   const unc = uncertainFieldLabels(inv);
   if (unc.length) readingNotes.push(`Overbill was unsure about the ${unc.join(", ")} and you confirmed ${unc.length === 1 ? "it" : "them"} before the check ran. If you confirmed from memory, re-check.`);
 
@@ -175,5 +177,5 @@ export function findingGuide(f: AuditFinding, inv: Invoice): FindingGuide {
   const verify = info.kind === "simulated"
     ? ["Do not use this result. Upload a CSV, paste the invoice text, or use a PDF that has selectable text to run a real check."]
     : [...(info.kind === "pdf" || info.kind === "ocr" || info.kind === "text" ? ["Confirm that the figures in “Invoice says” match what is printed on your bill."] : []), ...k.verify];
-  return { checked: k.checked, ruleName: meta?.name ?? f.ruleId, compared, verify, readingNotes };
+  return { checked: k.checked, ruleName: meta?.name ?? f.ruleId, compared, verify: inv.medical && info.kind !== "simulated" ? [MEDICAL_VERIFY_FIRST, ...verify] : verify, readingNotes };
 }

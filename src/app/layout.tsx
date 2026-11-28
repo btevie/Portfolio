@@ -14,9 +14,11 @@ export const metadata: Metadata = {
   title: { default: "Overbill", template: "%s · Overbill" },
   description: "Know what changed, what looks wrong, and what you could be overpaying, before you pay.",
   robots: { index: false, follow: false },
+  appleWebApp: { capable: true, title: "Overbill", statusBarStyle: "black-translucent" },
+  formatDetection: { telephone: false },
 };
 
-export const viewport: Viewport = { width: "device-width", initialScale: 1, viewportFit: "cover", themeColor: "#020617", colorScheme: "dark light" };
+export const viewport: Viewport = { width: "device-width", initialScale: 1, viewportFit: "cover", themeColor: [{ media: "(prefers-color-scheme: light)", color: "#eef1f8" }, { media: "(prefers-color-scheme: dark)", color: "#020617" }], colorScheme: "dark light" };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

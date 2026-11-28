@@ -18,7 +18,11 @@ export interface ExtractedInvoice {
   /** True for a credit note: amounts are kept positive and the document is tracked rather than audited. */
   isCredit?: boolean;
   /** Fields that could not be read confidently. The UI asks the user to confirm them before auditing. */
+  /** Looks like a medical bill (a hint the person can change on the review screen). */
+  medical?: boolean;
   lowConfidence: FieldKey[];
+  /** What a forgiving read assumed, shown to the user so nothing guessed passes as certain. */
+  notes?: string[];
   /** Set when the user confirms a review step: the fields that had been low-confidence. Kept so the audit can say so. */
   confirmedFields?: FieldKey[];
   /** How this was produced, shown to the user. */

@@ -53,7 +53,7 @@ export const priceHistoryRule: Rule = (inv, ctx) => {
     classification: "REVIEW_NEEDED", severity,
     title: promoExpired
       ? `Possible expired promo or contract rollover (+${cmp.pctDiff}%) with ${inv.vendorName}`
-      : `Charge is ${cmp.pctDiff}% higher than your usual with ${inv.vendorName}`,
+      : `Charge is ${cmp.pctDiff}% higher than the ${cmp.baselineLabel} with ${inv.vendorName}`,
     explanation: promoExpired
       ? `After ${cmp.sampleSize} identical bills of ${m(cmp.baseline)}, ${inv.vendorName} jumped to ${m(cmp.current)} (${formatMoney(diff, inv.currency, { signed: true })}). This pattern commonly happens when an introductory discount (welkomstkorting) or fixed-rate term expires.`
       : `The net charge is ${m(cmp.current)} against a ${cmp.baselineLabel} of ${m(cmp.baseline)} (${formatMoney(diff, inv.currency, { signed: true })}). This is an anomaly, not proof of an error. Vendors do raise prices.`,

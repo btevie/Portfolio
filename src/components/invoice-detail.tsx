@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Check, CheckCircle2, ChevronDown, ChevronLeft, FileSearch, History, MailPlus, Trash2, TriangleAlert } from "lucide-react";
+import { Check, CheckCircle2, ChevronDown, HeartPulse, ChevronLeft, FileSearch, History, MailPlus, Trash2, TriangleAlert } from "lucide-react";
 import { D, formatMoney } from "@/lib/audit/money";
 import { compareLines } from "@/lib/audit/line-compare";
 import { configFromSettings } from "@/lib/audit/engine";
@@ -15,6 +15,7 @@ import { actions } from "@/lib/data/store";
 import { fmtDate, STATUS_LABEL } from "@/lib/format";
 import { cn } from "@/lib/cn";
 import { extractionInfo, findingGuide, isSimulated, uncertainFieldLabels } from "@/lib/evidence";
+import { MEDICAL_CHECKLIST, MEDICAL_INTRO, MEDICAL_TITLE } from "@/lib/medical";
 import { ruleCoverage } from "@/lib/coverage";
 import type { AuditFinding, FindingDecision, Invoice } from "@/lib/types";
 import { DisputeKitEditor } from "@/components/dispute-kit";
@@ -56,14 +57,16 @@ export function InvoiceDetail({ id }: { id: string }) {
         </>}
       />
 
+      {!inv.isCredit && inv.medical && <MedicalNotice inv={inv} />}
       {!inv.isCredit && <SourceNotice inv={inv} />}
+      {!inv.isCredit && !inv.medical && !isSimulated(inv) && <p className="-mt-2 mb-4 text-xs text-muted-foreground">Is this a medical bill? <button type="button" onClick={() => actions.setMedical(inv.id, true)} className="min-h-9 cursor-pointer font-medium text-foreground underline underline-offset-2">Mark it as medical</button> for extra checks.</p>}
       {inv.isCredit && <div role="status" className="mb-4 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-primary"><strong>Credit note.</strong> This records money owed to you. It is not a bill to pay and is not audited as an invoice.</div>}
       {inv.isCredit && <CreditTracker credit={inv} />}
       {!inv.isCredit && (<>
       <motion.section aria-label="Verdict" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
         className={cn("relative mb-4 overflow-hidden rounded-2xl border-l-4 bg-card p-4 ring-1 ring-line sm:mb-6 sm:p-6", !simulated && open.length === 0 && cls === "CLEAR" ? "border-l-ok" : "border-l-warn")}>
         <p className={cn("relative flex items-center gap-2 text-lg font-semibold", !simulated && open.length === 0 && cls === "CLEAR" ? "text-ok" : "text-warn")}>
-          {simulated ? <><TriangleAlert className="size-6 shrink-0" aria-hidden />Demo example: not an audit of your bill</> : open.length === 0 && cls === "CLEAR" ? <><CheckCircle2 className="size-6 shrink-0" aria-hidden />{inv.isCredit ? "Credit note" : "Nothing flagged by our checks"}</> : <><TriangleAlert className="size-6 shrink-0" aria-hidden />{cls === "LIKELY_ERROR" ? "Hold payment until you've reviewed this" : "Check before you pay"}</>}
+          {simulated ? <><TriangleAlert className="size-6 shrink-0" aria-hidden />Demo example: not an audit of your bill</> : open.length === 0 && cls === "CLEAR" ? <><CheckCircle2 className="size-6 shrink-0" aria-hidden />{inv.isCredit ? "Credit note" : inv.medical ? "Nothing flagged, but check the medical list above" : "Nothing flagged by our checks"}</> : <><TriangleAlert className="size-6 shrink-0" aria-hidden />{cls === "LIKELY_ERROR" ? "Hold payment until you've reviewed this" : "Check before you pay"}</>}
         </p>
         {simulated ? (
           <p className="relative mt-2 text-sm text-muted-foreground">Overbill did not read your file, so there is no real result. The findings below only show what a check looks like on made-up figures. They are not counted in your totals, and you cannot dispute or track them.</p>
@@ -346,5 +349,18 @@ function EvidenceBlock({ guide, simulated }: { guide: ReturnType<typeof findingG
         <ol className="mt-1.5 list-decimal space-y-1 pl-5">{guide.verify.map((v, i) => <li key={i}>{v}</li>)}</ol>
       </div>
     </div>
+  );
+}
+
+
+/** Medical bills are shown first and loudly: the cost of a mistake is highest here. */
+function MedicalNotice({ inv }: { inv: Invoice }) {
+  return (
+    <section aria-label="Medical bill" className="mb-5 rounded-2xl border-l-4 border-l-sky-600 bg-sky-600/10 p-4 ring-1 ring-sky-600/30 sm:p-5">
+      <h2 className="flex items-center gap-2 text-base font-semibold text-sky-800 dark:text-sky-200"><HeartPulse className="size-5 shrink-0" aria-hidden />{MEDICAL_TITLE}</h2>
+      <p className="mt-1.5 text-sm">{MEDICAL_INTRO}</p>
+      <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm">{MEDICAL_CHECKLIST.map((c, i) => <li key={i}>{c}</li>)}</ol>
+      <p className="mt-3 text-xs text-muted-foreground">Overbill compares figures; it can&apos;t tell whether a treatment or code is right. This bill is never counted as clear to pay automatically. <button type="button" onClick={() => actions.setMedical(inv.id, false)} className="min-h-9 cursor-pointer font-medium text-foreground underline underline-offset-2">Not a medical bill</button></p>
+    </section>
   );
 }

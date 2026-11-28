@@ -27,9 +27,14 @@ export const round2 = (d: Decimal): Decimal => d.toDecimalPlaces(2, Decimal.ROUN
 export const str2 = (d: Decimal): string => round2(d).toFixed(2);
 export const sum = (vals: Decimal[]): Decimal => vals.reduce((a, b) => a.plus(b), new Decimal(0));
 
+const formatters = new Map<string, Intl.NumberFormat>();
+
+/** Rounds to the currency's own number of decimals (0 for JPY, 3 for BHD and KWD), not always 2, so no digit is lost or invented. */
 export function formatMoney(amount: Decimal.Value, currency: Currency, opts?: { signed?: boolean }): string {
-  const n = D(amount).toDecimalPlaces(2).toNumber();
-  const s = new Intl.NumberFormat("en-IE", { style: "currency", currency }).format(Math.abs(n));
+  let fmt = formatters.get(currency);
+  if (!fmt) { fmt = new Intl.NumberFormat("en-IE", { style: "currency", currency }); formatters.set(currency, fmt); }
+  const n = D(amount).toDecimalPlaces(fmt.resolvedOptions().maximumFractionDigits).toNumber();
+  const s = fmt.format(Math.abs(n));
   if (n < 0) return `-${s}`;
   return opts?.signed && n > 0 ? `+${s}` : s;
 }

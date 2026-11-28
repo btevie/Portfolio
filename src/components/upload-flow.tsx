@@ -3,7 +3,7 @@ import { celebrate } from "@/lib/celebrate";
 import Link from "next/link";
 import { useCallback, useState, useEffect } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertCircle, CheckCircle2, FileImage, FileSpreadsheet, FileText, LoaderCircle, ShieldCheck, X } from "lucide-react";
+import { Camera, AlertCircle, CheckCircle2, FileImage, FileSpreadsheet, FileText, HeartPulse, LoaderCircle, ShieldCheck, X } from "lucide-react";
 import { useAudited } from "@/lib/data/hooks";
 import { effectiveClassification } from "@/lib/data/selectors";
 import { isSimulated } from "@/lib/evidence";
@@ -13,7 +13,7 @@ import { CURRENCIES, currencyName, isCurrency } from "@/lib/currencies";
 import { actions, getSnapshotState, useAppState } from "@/lib/data/store";
 import { buildInvoice } from "@/lib/extraction/build";
 import { extractInvoice } from "@/lib/extraction";
-import { CSV_TEMPLATE, SAMPLE_TEXT } from "@/lib/extraction/parsers";
+import { CSV_TEMPLATE, MESSY_EXAMPLES, SAMPLE_TEXT } from "@/lib/extraction/parsers";
 import { analyzeCsv, CSV_FIELDS, mappedText, missingRequired, rememberMapping, type CsvAnalysis, type CsvMap } from "@/lib/extraction/csv-map";
 import { MAX_FILES, MAX_FILE_BYTES, MAX_TEXT_CHARS, type ExtractedInvoice, type FieldKey } from "@/lib/extraction/types";
 import { sniffFile, validateFile } from "@/lib/extraction/validate";
@@ -56,6 +56,21 @@ export function UploadFlow() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [tab, setTab] = useState<"files" | "text">("files");
   const [text, setText] = useState("");
+  const [pasted, setPasted] = useState(false);
+  // Paste anywhere on the page: copy the bill (an email, a receipt, a note) and press Ctrl/Cmd+V. It lands in the paste box, ready to check.
+  useEffect(() => {
+    const onPaste = (ev: ClipboardEvent) => {
+      const t = ev.target as HTMLElement | null;
+      if (t && (t.tagName === "TEXTAREA" || t.tagName === "INPUT" || t.isContentEditable)) return;
+      if (ev.clipboardData && ev.clipboardData.files.length > 0) return; // pasted files and screenshots are handled as files
+      const clip = ev.clipboardData?.getData("text") ?? "";
+      if (!clip.trim()) return;
+      ev.preventDefault();
+      setText(clip.slice(0, MAX_TEXT_CHARS)); setTab("text"); setPasted(true);
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, []);
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const patch = useCallback((id: string, p: Partial<Job>) => setJobs((js) => js.map((j) => (j.id === id ? { ...j, ...p } : j))), []);
@@ -90,6 +105,8 @@ export function UploadFlow() {
         const fileData = job.file && /\.(pdf|eml|png|jpe?g|webp)$/i.test(job.name) ? await job.file.arrayBuffer() : undefined;
         for (const s of STAGES.slice(0, 2)) { patch(job.id, { progress: s.at, stage: s.label }); await sleep(350); }
         extracted = await extractInvoice(job.text !== undefined ? { kind: "text", text: job.text } : { kind: "file", name: job.name, type: job.type ?? "", size: job.size ?? 0, text: fileText, data: fileData }, { defaultCurrency: state.settings.currency });
+        // A medical bill is always confirmed by the person first: a misread figure here costs the most.
+        if (extracted.medical) extracted = { ...extracted, lowConfidence: [...new Set([...extracted.lowConfidence, "vendorName", "date", "total"])] as ExtractedInvoice["lowConfidence"] };
         if (extracted.lowConfidence.length) { patch(job.id, { state: "review", progress: 45, stage: "Needs your confirmation", extracted, file: undefined }); return; }
       }
       for (const s of STAGES.slice(2)) { patch(job.id, { progress: s.at, stage: s.label }); await sleep(350); }
@@ -146,12 +163,18 @@ export function UploadFlow() {
                 onFiles={addFiles} accept=".pdf,.png,.jpg,.jpeg,.webp,.csv,.eml" inputLabel="Choose invoice files" label="Drag invoices here"
                 hint={`PDF (with text), saved email (.eml), PNG, JPG, WebP or CSV · up to ${MAX_FILES} files · ${MAX_FILE_BYTES / 1024 / 1024} MB each`}
               />
+              <label className="pointer-fine:hidden inline-flex min-h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-full bg-primary px-5 text-sm font-semibold text-primary-foreground active:scale-[0.98]">
+                <Camera className="size-5" aria-hidden />Scan with camera
+                <input type="file" accept="image/*" capture="environment" className="sr-only" aria-label="Take a photo of an invoice" onChange={(e) => { if (e.target.files) void addFiles(e.target.files); e.target.value = ""; }} />
+              </label>
               <p role="note" className="text-xs leading-relaxed text-muted-foreground">CSV, pasted text, text PDFs and saved emails are read directly. Photos and scans are read with on-device text recognition (OCR), which can misread a digit, so you confirm every field first. Nothing is uploaded. <a className="font-medium text-foreground underline underline-offset-2" href="#privacy-demo-limits">Privacy &amp; demo limits</a></p>
             </>
           ) : (
             <Card className="p-4">
-              <label htmlFor="paste" className="mb-1.5 block text-sm font-medium">Paste invoice text</label>
-              <Textarea id="paste" value={text} onChange={(e) => setText(e.target.value)} rows={11} placeholder={"Vendor: …\nInvoice #: …\nInvoice date: 2026-11-25\nDue date: 2026-12-09\nDescription | quantity | unit price | total\nSubtotal: …\nTax: …\nTotal: …"} className="font-mono text-sm leading-relaxed" />
+              <label htmlFor="paste" className="mb-1 block text-sm font-medium">Paste invoice text{pasted && <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-xs font-normal">Pasted from clipboard</span>}</label>
+              <p className="mb-2 text-xs text-muted-foreground">Paste whatever you have: an email, a receipt, a note, a bill in another language. Overbill finds the amounts, dates and totals and shows you what it understood before checking anything.</p>
+              <Textarea id="paste" value={text} onChange={(e) => setText(e.target.value)} rows={11} placeholder={"Paste anything, for example:\n\nNorthwind Hosting, invoice 2026-0047\nServer 166.98\nBackup add-on 9.99\nTotal 176.97"} className="font-mono text-sm leading-relaxed" />
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground"><span>Try a messy one:</span>{MESSY_EXAMPLES.map((x) => <button key={x.label} type="button" onClick={() => setText(x.text)} className="inline-flex min-h-9 cursor-pointer items-center rounded-full bg-muted px-3 font-medium text-foreground hover:bg-accent">{x.label}</button>)}</div>
               <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                 <button type="button" onClick={downloadCsvTemplate} className="mr-4 cursor-pointer text-sm font-medium text-primary hover:underline">Download CSV template</button><button type="button" onClick={() => setText(SAMPLE_TEXT)} className="cursor-pointer text-sm font-medium text-primary hover:underline">Insert a sample invoice</button>
                 <Button variant="primary" disabled={!text.trim() || busy} onClick={addText}>Check pasted invoice</Button>
@@ -199,7 +222,7 @@ function ResultChip({ id }: { id: string }) {
   const a = audits[id];
   const c = a ? effectiveClassification(state, a) : null;
   const invoice = state.invoices.find((i) => i.id === id);
-  useEffect(() => { if (c === "CLEAR" && !invoice?.isCredit && !(invoice && isSimulated(invoice))) celebrate({ kind: "clear", message: "Done. Nothing flagged (not a guarantee)" }); }, [c, invoice]);
+  useEffect(() => { if (c === "CLEAR" && !invoice?.isCredit && !invoice?.medical && !(invoice && isSimulated(invoice))) celebrate({ kind: "clear", message: "Done. Nothing flagged (not a guarantee)" }); }, [c, invoice]);
   if (!a || !c) return null;
   return (
     <div className="flex flex-wrap items-center gap-3">
@@ -242,30 +265,49 @@ const LABELS: Record<FieldKey, string> = { vendorName: "vendor", number: "invoic
 
 function ReviewForm({ e, onConfirm }: { e: ExtractedInvoice; onConfirm: (e: ExtractedInvoice) => void }) {
   const [v, setV] = useState({ vendorName: e.vendorName, number: e.number, date: e.date, dueDate: e.dueDate, currency: e.currency, total: e.total });
+  const [medical, setMedical] = useState(Boolean(e.medical));
   const [checked, setChecked] = useState(e.lowConfidence.length === 0); // flagged fields must be explicitly reviewed
   const flagged = (k: FieldKey) => e.lowConfidence.includes(k);
   // Credit notes are kept as positive amounts, but people write them as "-100", so the sign is accepted and dropped there.
   const totalClean = e.isCredit ? v.total.trim().replace(/^[-\u2212]\s*/, "") : v.total.trim();
-  const valid = Boolean(v.vendorName.trim() && v.number.trim() && parseISO(v.date) !== null && parseISO(v.dueDate) !== null && isCurrency(v.currency) && isValidDecimal(totalClean) && !totalClean.startsWith("-") && checked);
+  // Messy bills often have no number or due date. Those may be left blank: today's date and 30-day terms are used and labelled as assumptions.
+  const dateOk = v.date.trim() === "" || parseISO(v.date) !== null, dueOk = v.dueDate.trim() === "" || parseISO(v.dueDate) !== null;
+  const valid = Boolean(v.vendorName.trim() && dateOk && dueOk && isCurrency(v.currency) && isValidDecimal(totalClean) && !totalClean.startsWith("-") && checked);
+  const finish = (): ExtractedInvoice => {
+    const date = v.date.trim() || new Date().toISOString().slice(0, 10);
+    const due = v.dueDate.trim() || new Date(Date.parse(`${date}T00:00:00Z`) + 30 * 86_400_000).toISOString().slice(0, 10);
+    const assumed = [...(e.notes ?? []), ...(!v.date.trim() ? ["No invoice date: today's date was used."] : []), ...(!v.dueDate.trim() ? ["No due date: 30 days after the invoice date was assumed."] : []), ...(!v.number.trim() ? ["No invoice number: duplicate checks by number are limited."] : [])];
+    return { ...e, ...v, date, dueDate: due, total: totalClean, medical, lowConfidence: [], confirmedFields: e.lowConfidence, notes: assumed };
+  };
   const set = (k: keyof typeof v) => (ev: React.ChangeEvent<HTMLInputElement>) => setV({ ...v, [k]: ev.target.value });
   return (
-    <form className="mt-3 rounded-md border border-warn-line bg-warn-bg/40 p-4" onSubmit={(ev) => { ev.preventDefault(); if (valid) onConfirm({ ...e, ...v, total: totalClean, lowConfidence: [], confirmedFields: e.lowConfidence }); }}>
+    <form className="mt-3 rounded-md border border-warn-line bg-warn-bg/40 p-4" onSubmit={(ev) => { ev.preventDefault(); if (valid) onConfirm(finish()); }}>
       <p className="mb-3 flex items-start gap-2 text-sm text-warn"><AlertCircle className="mt-0.5 size-4 shrink-0" aria-hidden />Some invoice details couldn&apos;t be extracted confidently. Review the highlighted fields.</p>
+      {medical && <p className="mb-3 flex items-start gap-2 rounded-lg bg-sky-600/10 px-3 py-2 text-sm font-medium text-sky-800 ring-1 ring-sky-600/30 dark:text-sky-200"><HeartPulse className="mt-0.5 size-4 shrink-0" aria-hidden />This looks like a medical bill. Check every figure below against the paper or portal copy.</p>}
+      {(e.notes?.length ?? 0) > 0 && <ul className="mb-3 list-disc space-y-1 pl-9 text-xs text-muted-foreground">{e.notes!.map((n, i) => <li key={i}>{n}</li>)}</ul>}
+      {e.notes && e.lines.length > 0 && (
+        <div className="mb-3 overflow-hidden rounded-md border border-line bg-card text-sm">
+          <p className="border-b border-line px-3 py-1.5 text-xs font-medium text-muted-foreground">What Overbill read ({e.lines.length} line{e.lines.length === 1 ? "" : "s"})</p>
+          <ul className="divide-y divide-line">{e.lines.map((l, i) => <li key={i} className="flex items-baseline justify-between gap-3 px-3 py-1.5"><span className="min-w-0"><span className="block truncate">{l.description}</span><span className="num block text-xs text-muted-foreground">{l.quantity} × {l.unitPrice}{l.kind === "fee" ? " · fee" : ""}</span></span><span className="num shrink-0 font-medium">{l.total}</span></li>)}</ul>
+          <p className="border-t border-line px-3 py-1.5 text-xs text-muted-foreground">Wrong? Remove this one, fix the text above, and check again.</p>
+        </div>
+      )}
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Vendor" htmlFor="rv-vendor" flagged={flagged("vendorName")}><input id="rv-vendor" className={fieldClass} value={v.vendorName} onChange={set("vendorName")} /></Field>
-        <Field label="Invoice number" htmlFor="rv-number" flagged={flagged("number")}><input id="rv-number" className={fieldClass} value={v.number} onChange={set("number")} /></Field>
-        <Field label="Invoice date" htmlFor="rv-date" flagged={flagged("date")} hint="YYYY-MM-DD"><input id="rv-date" className={fieldClass} value={v.date} onChange={set("date")} placeholder="2026-11-25" /></Field>
-        <Field label="Due date" htmlFor="rv-due" flagged={flagged("dueDate")} hint="YYYY-MM-DD"><input id="rv-due" className={fieldClass} value={v.dueDate} onChange={set("dueDate")} placeholder="2026-12-25" /></Field>
+        <Field label="Invoice number" htmlFor="rv-number" flagged={flagged("number")}><input id="rv-number" className={fieldClass} value={v.number} onChange={set("number")} placeholder="Optional" /></Field>
+        <Field label="Invoice date" htmlFor="rv-date" flagged={flagged("date")} hint="YYYY-MM-DD · blank = today"><input id="rv-date" className={fieldClass} value={v.date} onChange={set("date")} placeholder="2026-11-25" /></Field>
+        <Field label="Due date" htmlFor="rv-due" flagged={flagged("dueDate")} hint="YYYY-MM-DD · blank = 30 days later"><input id="rv-due" className={fieldClass} value={v.dueDate} onChange={set("dueDate")} placeholder="2026-12-25" /></Field>
         <Field label="Currency" htmlFor="rv-currency" flagged={flagged("currency")}><SelectMenu id="rv-currency" label="Currency" value={v.currency} searchable options={CURRENCIES.map((c) => ({ value: c, label: `${currencyName(c)} (${c})` }))} onChange={(currency) => setV({ ...v, currency })} /></Field>
         <Field label={`Total (${v.currency})`} htmlFor="rv-total" flagged={flagged("total")}><input id="rv-total" inputMode="decimal" className={fieldClass} value={v.total} onChange={set("total")} /></Field>
       </div>
+      <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-3 text-sm"><input type="checkbox" checked={medical} onChange={(ev) => setMedical(ev.target.checked)} className="size-5 shrink-0 accent-[var(--primary)]" /><span>This is a medical bill (extra checks, and never marked clear to pay automatically)</span></label>
       {e.lowConfidence.length > 0 && (
         <label className="mt-3 flex min-h-11 cursor-pointer items-start gap-3 text-sm">
           <input type="checkbox" checked={checked} onChange={(ev) => setChecked(ev.target.checked)} className="mt-0.5 size-5 shrink-0 accent-[var(--primary)]" />
           <span>I checked the highlighted fields ({e.lowConfidence.map((k) => LABELS[k]).join(", ")}) and they match my invoice.</span>
         </label>
       )}
-      <div className="mt-3 flex justify-end"><Button type="button" variant="primary" disabled={!valid} onClick={() => valid && onConfirm({ ...e, ...v, total: totalClean, lowConfidence: [], confirmedFields: e.lowConfidence })}>Confirm and run audit</Button></div>
+      <div className="mt-3 flex justify-end"><Button type="button" variant="primary" disabled={!valid} onClick={() => valid && onConfirm(finish())}>Confirm and run audit</Button></div>
     </form>
   );
 }

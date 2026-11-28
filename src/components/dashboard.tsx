@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useMemo, useSyncExternalStore } from "react";
 import { GET_STARTED_EVENT, getStartedVisible, hideGetStarted } from "@/lib/get-started";
-import { ArrowRight, Check, Download, CheckCircle2, Circle, Inbox, Upload, X } from "lucide-react";
+import { ArrowRight, Check, Download, HeartPulse, CheckCircle2, Circle, Inbox, Upload, X } from "lucide-react";
 import { D, formatMoney } from "@/lib/audit/money";
 import { useVendorStats } from "@/lib/data/hooks";
 import { actionQueue, dashboardMetrics, nextActions, paymentStatusAt, pendingCreditNote, stakeByVendor, type NextAction } from "@/lib/data/selectors";
@@ -90,7 +90,7 @@ function NextActions({ actions }: { actions: NextAction[] }) {
         </article>
 
         <div className="rounded-2xl bg-card p-3 ring-1 ring-line sm:p-4 lg:rounded-none lg:border-l lg:border-line lg:bg-transparent lg:py-5 lg:pr-5 lg:pl-4 lg:ring-0">
-          <div className="flex items-center justify-between rounded-xl bg-muted/70 px-3 py-2 text-xs text-muted-foreground"><span>Up next</span><Link href="/pay-run" className="font-medium text-primary">Open pay run</Link></div>
+          <div className="flex items-center justify-between rounded-xl bg-muted/70 px-3 py-2 text-xs text-muted-foreground"><span>Up next</span><Link href="/pay-run" className="-my-2 inline-flex min-h-11 items-center font-medium text-primary">Open pay run</Link></div>
           {more.length === 0 ? <p className="px-3 py-4 text-sm text-muted-foreground">That&apos;s the only item right now.</p> : (
             <ol className="mt-1">
               {more.map((a) => (
@@ -119,6 +119,7 @@ export function Dashboard() {
   const m = useMemo(() => dashboardMetrics(state, audits, 6), [state, audits]);
   const cur = m.currency;
   const backupDays = useBackupAge();
+  const medicalUnpaid = state.invoices.filter((i) => i.medical && !i.isCredit && i.paymentStatus !== "paid");
   const hasOwnData = state.invoices.some((i) => i.source !== "demo" && !isSimulated(i)); // scripted examples need no backup
   const stakeText = m.atStake.map((t) => formatMoney(t.amount, t.currency)).join(" · "); // per currency, never summed
   const whole = (v: number) => new Intl.NumberFormat("en-IE", { style: "currency", currency: cur, maximumFractionDigits: 0 }).format(v);
@@ -173,6 +174,13 @@ export function Dashboard() {
       )}
 
       {creditBanner}
+
+      {medicalUnpaid.length > 0 && (
+        <Link href="/invoices?q=medical" className="flex items-start gap-3 rounded-2xl border-l-4 border-l-sky-600 bg-sky-600/10 px-4 py-3 text-sm ring-1 ring-sky-600/30 transition-transform active:scale-[0.99]">
+          <HeartPulse className="mt-0.5 size-5 shrink-0 text-sky-700 dark:text-sky-300" aria-hidden />
+          <span className="min-w-0"><strong className="font-semibold">{medicalUnpaid.length} unpaid medical bill{medicalUnpaid.length === 1 ? "" : "s"}.</strong> Check {medicalUnpaid.length === 1 ? "it" : "each one"} against your insurer&apos;s statement before paying.</span>
+        </Link>
+      )}
 
       <GetStarted steps={[
         { label: "Check one of your own invoices", done: state.invoices.some((i) => i.source === "upload" && !i.isCredit && !isSimulated(i)), href: "/invoices/new" },

@@ -56,9 +56,19 @@ export function toAmount(raw: string | undefined): string | null {
   return `${neg ? "-" : ""}${s}`;
 }
 
+const MONTH_NUM: Record<string, number> = { jan: 1, feb: 2, mar: 3, mrt: 3, apr: 4, may: 5, mei: 5, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, okt: 10, nov: 11, dec: 12, dez: 12 };
+
 function toDate(raw: string | undefined): string {
   const t = (raw ?? "").trim();
   if (parseISO(t.slice(0, 10)) !== null) return t.slice(0, 10);
+  const ymd = /^(\d{4})[/.](\d{1,2})[/.](\d{1,2})/.exec(t); // 2026/11/03
+  if (ymd) { const v = `${ymd[1]}-${ymd[2].padStart(2, "0")}-${ymd[3].padStart(2, "0")}`; if (parseISO(v) !== null) return v; }
+  const named = /^(\d{1,2})(?:st|nd|rd|th)?[ -]([A-Za-z]{3,9})\.?,?[ -](\d{2,4})/.exec(t); // 3 Nov 2026
+  if (named && MONTH_NUM[named[2].slice(0, named[2].toLowerCase().startsWith("sept") ? 4 : 3).toLowerCase()]) {
+    const y = named[3].length === 2 ? `20${named[3]}` : named[3];
+    const v = `${y}-${String(MONTH_NUM[named[2].slice(0, named[2].toLowerCase().startsWith("sept") ? 4 : 3).toLowerCase()]).padStart(2, "0")}-${named[1].padStart(2, "0")}`;
+    if (parseISO(v) !== null) return v;
+  }
   const m = /^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})$/.exec(t);
   if (!m) return "";
   const y = m[3].length === 2 ? `20${m[3]}` : m[3];
@@ -83,10 +93,50 @@ export interface ParsedStatement {
   /** Kept for callers that only need a count. */
   skipped: number;
   convention?: SignConvention;
-  /** True when a single Amount column has no negative numbers, so the direction can't be told from the file. The caller must ask. */
+  /** True for a single Amount column with no convention chosen yet: the file cannot say which sign means "paid out". The caller must ask. */
   ambiguous?: boolean;
+  /** A best guess to pre-select when asking (never applied by itself). */
+  suggested?: SignConvention;
   error?: string;
 }
+
+/** At least 2 decimals, and never fewer than the statement gave, so a 3-decimal currency (BHD, KWD) is not rounded into a wrong amount. */
+const exact = (d: Decimal) => d.toFixed(Math.max(2, d.decimalPlaces()));
+
+/**
+ * Rows with no headers: find the column that holds dates, the one that holds amounts and the one with the most text, and rebuild a
+ * plain Date,Description,Amount table. Returns null unless the data is clearly a list of dated amounts.
+ */
+function inferStatementCsv(rows: string[][]): string | null {
+  const width = Math.max(0, ...rows.map((r) => r.length));
+  if (width < 2 || rows.length < 1) return null;
+  const share = (i: number, ok: (c: string) => boolean) => rows.filter((r) => ok(r[i] ?? "")).length / rows.length;
+  let dateC = -1, best = 0;
+  for (let i = 0; i < width; i++) { const f = share(i, (c) => toDate(c) !== ""); if (f > best && f >= 0.6) { best = f; dateC = i; } }
+  if (dateC < 0) return null;
+  const numeric = (c: string) => /\d/.test(c) && toAmount(c) !== null && toDate(c) === "";
+  const amountC = Array.from({ length: width }, (_, i) => i).find((i) => i !== dateC && share(i, numeric) >= 0.6) ?? -1;
+  if (amountC < 0) return null;
+  let descC = -1, longest = 0;
+  for (let i = 0; i < width; i++) {
+    if (i === dateC || i === amountC || share(i, numeric) >= 0.6) continue;
+    const avg = rows.reduce((t, r) => t + (r[i] ?? "").trim().length, 0) / rows.length;
+    if (avg > longest) { longest = avg; descC = i; }
+  }
+  if (descC < 0) return null;
+  const q = (v: string) => `"${v.replace(/"/g, '""').trim()}"`;
+  const out = ["Date,Description,Amount"];
+  for (const r of rows) { const d = toDate(r[dateC]); if (d && toAmount(r[amountC]) !== null) out.push(`${d},${q(r[descC] ?? "")},${q(r[amountC] ?? "")}`); }
+  return out.length > 1 ? out.join("\n") : null;
+}
+
+/** The statement's column names, used to remember which sign convention the user chose for this bank's format. */
+export function statementSignature(text: string): string {
+  const first = text.replace(/^\uFEFF/, "").split(/\r?\n/, 1)[0] ?? "";
+  return first.toLowerCase().replace(/[^a-z0-9,;\t]+/g, " ").split(/[,;\t]/).map((h) => h.trim()).filter(Boolean).join("|");
+}
+
+const INCOMING_WORDS = /\b(refund|reversal|rebate|cashback|credit note|payment received|deposit|received|incoming|transfer in)\b/i;
 
 /** Reads a bank or card statement CSV. Only money going out is kept; everything else is accounted for in `incoming` / `unreadable`. */
 export function parseStatement(text: string, opts: { convention?: SignConvention } = {}): ParsedStatement {
@@ -106,18 +156,32 @@ export function parseStatement(text: string, opts: { convention?: SignConvention
   // "Debit Amount" / "Credit Amount" are the split columns, not the single signed Amount column.
   const amountMatch = find(/^(amount|value|sum)\b|\bamount\b/);
   const amountI = amountMatch === outI || amountMatch === inI ? -1 : amountMatch;
+  if (dateI < 0 || !descIs.length || (amountI < 0 && outI < 0)) {
+    // No usable header row (rows copied from a bank website, or an export without headers): work out the columns from the data itself.
+    const spaced = content.split(/\r?\n/).filter((l) => l.trim()).map((l) => l.trim().split(/\s{2,}|\t/)); // columns separated by runs of spaces
+    const inferred = inferStatementCsv(rows.some((r) => r.length >= 2) ? rows : spaced);
+    if (inferred) return parseStatement(inferred, opts);
+  }
   if (dateI < 0 || !descIs.length || (amountI < 0 && outI < 0)) return { ...empty, error: "Couldn't find the date, description and amount columns. Export your statement as CSV with headers such as Date, Description and Amount." };
 
   const split = outI >= 0 && amountI < 0;
   const parsed = rows.slice(1).map((r, k) => ({ r, line: k + 2 }));
   let convention: SignConvention | undefined = split ? "split-columns" : opts.convention;
   let ambiguous = false;
+  let suggested: SignConvention | undefined;
   if (!split && !convention) {
-    const signed = parsed.map(({ r }) => toAmount(r[amountI])).filter((a): a is string => a !== null);
-    if (signed.some((a) => a.startsWith("-"))) convention = "negative-out"; // a mix of signs: negatives are the payments
-    else ambiguous = signed.length > 0; // all one sign: the file doesn't say which direction it is
+    // One Amount column never says which sign means "paid out": banks use negatives for payments, card statements use positives
+    // (and negatives for refunds). A wrong guess would show a refund as a payment and miss real double payments, so ask.
+    const rowsWithAmount = parsed.map(({ r }) => ({ a: toAmount(r[amountI]), memo: descIs.map((i) => r[i] ?? "").join(" ") })).filter((x): x is { a: string; memo: string } => x.a !== null);
+    if (rowsWithAmount.length > 0) {
+      ambiguous = true;
+      const neg = rowsWithAmount.filter((x) => x.a.startsWith("-")), pos = rowsWithAmount.filter((x) => !x.a.startsWith("-"));
+      const hint = (rows: typeof neg) => rows.filter((x) => INCOMING_WORDS.test(x.memo)).length;
+      if (neg.length && pos.length) suggested = hint(neg) > hint(pos) || (hint(neg) === hint(pos) && neg.length < pos.length) ? "positive-out" : "negative-out";
+      else suggested = neg.length ? "negative-out" : "positive-out";
+    }
   }
-  if (ambiguous) return { ...empty, ambiguous: true };
+  if (ambiguous) return { ...empty, ambiguous: true, suggested };
 
   const txs: BankTx[] = [], incoming: BankTx[] = [], unreadable: StatementRow[] = [];
   for (const { r, line } of parsed) {
@@ -145,8 +209,8 @@ export function parseStatement(text: string, opts: { convention?: SignConvention
     if (!date) unclear = unclear || `Date "${(r[dateI] ?? "").trim().slice(0, 20) || "(empty)"}" is not recognised (use YYYY-MM-DD or DD/MM/YYYY)`;
     if (!description) unclear = unclear || "No description";
     if (unclear) { unreadable.push({ line, status: "unreadable", reason: unclear, raw }); continue; }
-    if (inn !== null && D(inn).gt(0)) incoming.push({ date, description, amount: D(inn).toFixed(2), line });
-    else if (out !== null && D(out).gt(0)) txs.push({ date, description, amount: D(out).toFixed(2), line });
+    if (inn !== null && D(inn).gt(0)) incoming.push({ date, description, amount: exact(D(inn)), line });
+    else if (out !== null && D(out).gt(0)) txs.push({ date, description, amount: exact(D(out)), line });
   }
   return { txs, incoming, unreadable, skipped: unreadable.length, convention };
 }

@@ -3,6 +3,8 @@ import { parseISO } from "../audit/normalize";
 import { isCurrency, SYMBOLS } from "../currencies";
 import type { Currency } from "../types";
 import { cleanText } from "./sanitize";
+import { looseRead } from "./loose";
+import { looksMedical } from "../medical";
 import { MAX_DESC_CHARS, MAX_LINES, MAX_NUMBER_CHARS, MAX_VENDOR_CHARS, type ExtractedInvoice, type FieldKey } from "./types";
 
 type Line = ExtractedInvoice["lines"][number];
@@ -39,6 +41,8 @@ const iso = (s: string | undefined): string => {
   if (!s) return "";
   const t = s.trim();
   if (parseISO(t) !== null) return t;
+  const ymd = /^(\d{4})[./](\d{1,2})[./](\d{1,2})$/.exec(t); // 2026/10/05 and 2026.10.05
+  if (ymd) { const v = `${ymd[1]}-${ymd[2].padStart(2, "0")}-${ymd[3].padStart(2, "0")}`; if (parseISO(v) !== null) return v; }
   const m = /^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/.exec(t);
   if (m) {
     const a = Number(m[1]), b = Number(m[2]);
@@ -93,6 +97,7 @@ function finalize(p: {
     vendorName: vendorName ?? "", number: number ?? "", date: p.date ?? "", dueDate: p.dueDate ?? "",
     currency: currency ?? p.defaultCurrency, lines: p.lines,
     subtotal, discounts: str2(discounts), fees: str2(fees), taxAmount, taxRate: p.taxRate, total, lowConfidence: low, method: p.method,
+    ...(looksMedical(vendorName ?? "", p.lines.map((l) => l.description)) ? { medical: true } : {}),
     ...(p.isCredit ? { isCredit: true } : {}),
   };
 }
@@ -194,14 +199,35 @@ export function parseText(text: string, defaultCurrency: Currency, method: "text
   const vatIsRate = Boolean(kv["vat"]?.trim().endsWith("%"));
   const taxRate = optionalRate(kv["taxrate"] ?? kv["vatrate"] ?? (vatIsRate ? kv["vat"] : undefined), "Tax rate");
   if (taxRate) lines.forEach((l) => (l.taxRate = taxRate));
-  if (lines.length === 0) throw new Error("No line items found. Use one line per item: description | quantity | unit price | total");
-  return finalize({
-    vendorName: kv["vendor"] ?? kv["from"] ?? kv["supplier"], number: kv["invoice"] ?? kv["invoice#"] ?? kv["invoiceno"] ?? kv["invoicenumber"] ?? kv["invoicenumber"] ?? kv["no"],
-    date: iso(kv["invoicedate"] ?? kv["date"]), dueDate: iso(kv["duedate"] ?? kv["due"]), currency: kv["currency"], taxRate, lines,
-    subtotal: optionalNumber(kv["subtotal"], "Subtotal"), discounts: optionalNumber(kv["discount"] ?? kv["discounts"], "Discounts"), taxAmount: optionalNumber(kv["tax"] ?? (vatIsRate ? undefined : kv["vat"]), "Tax amount"),
-    total: optionalNumber(kv["total"] ?? kv["amountdue"], "Invoice total"), method, defaultCurrency,
+  let loose: ReturnType<typeof looseRead> | undefined;
+  if (lines.length === 0) {
+    // Not in Overbill's own format (receipts, notes, other languages, tab-separated tables): read it loosely, and say what was assumed.
+    loose = looseRead(text, defaultCurrency);
+    if (!loose.lines.length) throw new Error("Couldn't find any line items or a total in that text. Paste the lines of the bill with their amounts, or use: description | quantity | unit price | total");
+    for (const l of loose.lines) lines.push(line(l.description, l.quantity, l.unitPrice, l.total, l.kind));
+  }
+  const L = loose; // values the person wrote as "Key: value" win; the loose read only fills gaps
+  const result = finalize({
+    vendorName: kv["vendor"] ?? kv["from"] ?? kv["supplier"] ?? L?.vendorName, number: kv["invoice"] ?? kv["invoice#"] ?? kv["invoiceno"] ?? kv["invoicenumber"] ?? kv["no"] ?? L?.number,
+    date: iso(kv["invoicedate"] ?? kv["date"] ?? L?.date), dueDate: iso(kv["duedate"] ?? kv["due"] ?? L?.dueDate), currency: kv["currency"] ?? L?.currency, taxRate: taxRate ?? L?.taxRate, lines,
+    subtotal: optionalNumber(kv["subtotal"] ?? L?.subtotal, "Subtotal"), discounts: optionalNumber(kv["discount"] ?? kv["discounts"] ?? L?.discounts, "Discounts"),
+    taxAmount: optionalNumber(kv["tax"] ?? (vatIsRate ? undefined : kv["vat"]) ?? L?.taxAmount, "Tax amount"),
+    total: optionalNumber(kv["total"] ?? kv["amountdue"] ?? L?.total, "Invoice total"), method, defaultCurrency,
   });
+  if (!L) return result;
+  // Everything the loose read guessed must be confirmed by the person before the audit runs.
+  const low = new Set(result.lowConfidence);
+  low.add("total");
+  if (L.ambiguousDate) low.add("date");
+  return { ...result, lowConfidence: [...low], notes: L.notes };
 }
+
+/** Messy but realistic pastes, so people can see that "just paste whatever you have" works. */
+export const MESSY_EXAMPLES: { label: string; text: string }[] = [
+  { label: "A café receipt", text: "Bean There Coffee Co\nReceipt #4471  12 Nov 2026\n2x Flat white  7.00\n1x Croissant 3.50\nSubtotal 10.50\nVAT 21% 2.20\nTotal due: €12.70" },
+  { label: "A note to myself", text: "hey here's the bill from northwind hosting\nthey charged me 166.98 this month for the server\nplus 9.99 backup addon\ntotal 176.97 thanks" },
+  { label: "A Dutch utility bill", text: "ENERGIE NV\nFactuur nr: 2026-8812\nDatum 03-11-2026 Vervaldatum 17-11-2026\nStroom verbruik 312 kWh x 0,28 = 87,36\nVaste kosten 12,50\nBTW 21% 21,03\nTotaal te betalen 120,89 EUR" },
+];
 
 /** A ready-to-fill CSV in the format `parseCsv` reads. Header + one example row per kind. */
 export const CSV_TEMPLATE = `description,quantity,unit_price,line_total,kind,vendor,invoice_number,invoice_date,due_date,currency,tax_rate,discounts,tax,total

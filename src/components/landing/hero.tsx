@@ -42,7 +42,7 @@ export function Hero() {
           <div className="flex items-center gap-14">
           <Link href="/" className="flex min-h-11 items-center gap-2.5" aria-label="Overbill home">
             <svg viewBox="0 0 28 28" className="size-9" aria-hidden><rect width="28" height="28" rx="8" className="fill-green-700" /><circle cx="14" cy="14" r="6.5" fill="none" stroke="white" strokeWidth="3" /><path d="M17.5 5.5 22 10" stroke="white" strokeOpacity="0.65" strokeWidth="3" strokeLinecap="round" /></svg>
-            <span className="text-2xl font-semibold tracking-tight">Overbill</span>
+            <span className="text-2xl font-semibold tracking-tight max-[359px]:hidden">Overbill</span>
           </Link>
           <nav aria-label="Site" className="hidden items-center gap-10 text-[17px] font-medium text-muted-foreground lg:flex">
             <a href="#top" className="hover:text-foreground">Home</a>

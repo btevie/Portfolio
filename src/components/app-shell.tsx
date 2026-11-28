@@ -95,6 +95,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const onSampleProfile = profile.id === "u-demo" && profile.email === "demo@overbill.example";
   // Animate route changes only; the first paint must stay visible in the server HTML (no opacity:0 flash).
   const [firstPath] = useState(path);
+  const [typing, setTyping] = useState(false);
+  useEffect(() => {
+    const on = (e: FocusEvent) => setTyping(e.type === "focusin" && e.target instanceof HTMLElement && e.target.matches("input:not([type=checkbox]):not([type=radio]):not([type=file]),textarea"));
+    document.addEventListener("focusin", on); document.addEventListener("focusout", on);
+    return () => { document.removeEventListener("focusin", on); document.removeEventListener("focusout", on); };
+  }, []);
   useEffect(() => { document.documentElement.dataset.hydrated = "1"; }, []);
 
   if (PUBLIC_PATHS.has(path)) return <MotionConfig reducedMotion="user">{children}</MotionConfig>;
@@ -116,7 +122,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="min-w-0 flex-1">
           <TopBar />
           {/* Mobile: top bar + sheet */}
-          <div className="sticky top-0 z-30 flex h-16 items-center justify-between bg-background/90 px-5 backdrop-blur lg:hidden">
+          <div className="sticky top-0 z-30 flex h-[calc(4rem+env(safe-area-inset-top))] items-center justify-between bg-background/90 px-5 pt-[env(safe-area-inset-top)] backdrop-blur lg:hidden">
             <Link href="/dashboard" className="flex min-h-11 items-center gap-2.5"><Mark className="size-7" /><span className="text-base font-semibold tracking-tight">Overbill</span></Link>
             <div className="flex items-center"><ThemeToggle className="soft-pill size-10 rounded-full" /><div className="ml-1"><NotificationBell className="size-10" /></div>
               <div className="ml-2"><UserMenu size={40} /></div></div>
@@ -144,7 +150,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </main>
 
           <Celebration />
-          <nav aria-label="Main" className="fixed inset-x-4 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-40 flex items-center justify-between rounded-full bg-card/95 p-1.5 shadow-[0_12px_32px_-8px_rgb(0_0_0/0.35)] ring-1 ring-border backdrop-blur lg:hidden">
+          <nav aria-label="Main" data-typing={typing} className="fixed inset-x-4 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-40 flex items-center justify-between rounded-full transition-transform duration-200 data-[typing=true]:translate-y-[200%] bg-card/95 p-1.5 shadow-[0_12px_32px_-8px_rgb(0_0_0/0.35)] ring-1 ring-border backdrop-blur lg:hidden">
             {[NAV[0], NAV[1], { href: "/invoices/new", label: "Check", icon: Upload }, NAV[4], NAV[3]].map((n) => {
               const active = n.href === "/invoices/new" ? path === n.href : n.href === "/invoices" ? path.startsWith("/invoices") && path !== "/invoices/new" : path.startsWith(n.href);
               return (

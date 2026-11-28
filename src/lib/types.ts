@@ -51,7 +51,11 @@ export interface Invoice {
   /** How the figures were obtained. "mock" = scripted demo data; the uploaded file was NOT read. */
   extraction?: "mock" | "csv" | "text" | "pdf" | "ocr";
   /** Fields Overbill could not read confidently and the user confirmed before the audit ran (for example "date"). */
+  /** A medical bill: shown prominently, always confirmed, never counted as clear to pay automatically. */
+  medical?: boolean;
   uncertainFields?: string[];
+  /** What a forgiving read of messy text assumed (for example "30-day terms assumed"), kept so findings can say so. */
+  readNotes?: string[];
   /** A credit note: the vendor owes you this amount. Amounts are stored positive; it is tracked, not audited, and never counted as spend or money at stake. */
   isCredit?: boolean;
   /** Monotonic ordering used to break date ties (original before re-send). */

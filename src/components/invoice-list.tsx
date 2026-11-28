@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowUpDown, ArrowUpRight, Check, ChevronDown, ChevronLeft, ChevronRight, FileText, Search, X } from "lucide-react";
+import { ArrowUpDown, ArrowUpRight, Check, ChevronDown, ChevronLeft, ChevronRight, FileText, Search, X, HeartPulse } from "lucide-react";
 import { D, formatMoney } from "@/lib/audit/money";
 import { parseISO } from "@/lib/audit/normalize";
 import { useAudited } from "@/lib/data/hooks";
@@ -60,8 +60,8 @@ function SortMenu({ value, onChange }: { value: keyof typeof SORTS; onChange: (v
   return (
     <div ref={ref} className="relative shrink-0">
       <button type="button" aria-label="Sort invoices" aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((o) => !o)}
-        className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-full bg-muted px-3.5 text-sm font-medium outline-none transition-transform focus-visible:ring-2 focus-visible:ring-ring active:scale-95">
-        <ArrowUpDown className="size-4 text-muted-foreground" aria-hidden />{SORTS[value]}<ChevronDown className={cn("size-4 text-muted-foreground transition-transform", open && "rotate-180")} aria-hidden />
+        className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-full bg-muted px-3 text-sm max-sm:gap-1 font-medium outline-none transition-transform focus-visible:ring-2 focus-visible:ring-ring active:scale-95">
+        <ArrowUpDown className="size-4 text-muted-foreground" aria-hidden /><span className="max-sm:sr-only">{SORTS[value]}</span><ChevronDown className={cn("size-4 text-muted-foreground transition-transform", open && "rotate-180")} aria-hidden />
       </button>
       <AnimatePresence>
         {open && (
@@ -138,7 +138,7 @@ export function InvoiceList() {
           classification: effectiveClassification(state, audits[invoice.id]),
           finding: open[0],
           amountAtRisk: isSimulated(invoice) ? D(0) : invoiceExposure(open, invoice.total), // an invented bill has no real money at stake
-          searchText: `${invoice.vendorName} ${invoice.number} ${invoice.isCredit ? "credit note" : ""} ${open.map((finding) => finding.title).join(" ")}`.toLowerCase(),
+          searchText: `${invoice.vendorName} ${invoice.number} ${invoice.isCredit ? "credit note" : ""} ${invoice.medical ? "medical" : ""} ${open.map((finding) => finding.title).join(" ")}`.toLowerCase(),
         };
       })
       .filter(({ classification, searchText, invoice }) =>
@@ -217,7 +217,7 @@ export function InvoiceList() {
               { label: "Nothing flagged", value: counts.clear, hint: "Not a guarantee", tone: "text-ok" },
             ]).map((c, i) => (
               <motion.div key={c.label} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1], delay: 0.06 * (i + 1) }} className={cn(card, "flex min-w-0 flex-col justify-between rounded-2xl px-3.5 py-3.5 sm:px-5 sm:py-5")}>
-                <p className="truncate text-xs text-muted-foreground sm:text-sm">{c.label}</p>
+                <p className="text-xs leading-tight text-muted-foreground sm:text-sm">{c.label}</p>
                 <div className="flex items-baseline gap-2"><p className="num mt-1 text-xl font-semibold tracking-tight sm:mt-2 sm:text-3xl"><CountUp value={c.value} /></p><p className={cn("hidden truncate text-xs font-medium sm:block", c.tone)}>{c.hint}</p></div>
               </motion.div>
             ))}
@@ -234,14 +234,14 @@ export function InvoiceList() {
               <SortMenu value={sort} onChange={(v) => set("sort", v)} />
             </div>
 
-            <div role="group" aria-label="Filter invoices by status" className={cn("mt-3 grid gap-2", counts.credits > 0 ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-3")}>
+            <div role="group" aria-label="Filter invoices by status" className={"mt-3 flex flex-wrap gap-2"}>
               {FILTERS.filter((f) => f.value !== "credits" || counts.credits > 0).map((f) => {
                 const active = status === f.value;
                 return (
                   <motion.button key={f.value} type="button" aria-pressed={active} whileTap={{ scale: 0.94 }} onClick={() => set("status", f.value)}
-                    className={cn("relative inline-flex h-10 min-w-0 cursor-pointer items-center justify-center gap-1.5 rounded-full px-2 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring", active ? "text-primary-foreground" : "bg-muted text-foreground")}>
+                    className={cn("relative inline-flex h-10 min-w-0 flex-1 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-3 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring", active ? "text-primary-foreground" : "bg-muted text-foreground")}>
                     {active && <motion.span layoutId="inv-chip" className="absolute inset-0 rounded-full bg-primary" transition={{ type: "spring", stiffness: 500, damping: 38 }} />}
-                    <span className="relative truncate">{f.label}</span><span className="num relative text-xs">{counts[f.value]}</span>
+                    <span className="relative">{f.label}</span><span className="num relative text-xs">{counts[f.value]}</span>
                   </motion.button>
                 );
               })}
@@ -281,12 +281,12 @@ export function InvoiceList() {
                               <Link href={`/invoices/${invoice.id}`} className="flex min-h-[4.5rem] items-center gap-3.5 rounded-2xl px-1.5 py-3.5 outline-none focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring">
                                 <VendorAvatar name={invoice.vendorName} />
                                 <div className="min-w-0 flex-1">
-                                  <p className="truncate text-sm font-semibold leading-snug">{invoice.vendorName}</p>
+                                  <p className="line-clamp-2 text-sm font-semibold leading-snug">{invoice.vendorName}{invoice.medical && <>{" "}<span className="inline-flex items-center gap-1 rounded-md bg-sky-600/10 px-1.5 py-0.5 text-[11px] font-semibold text-sky-800 ring-1 ring-sky-600/30 dark:text-sky-200"><HeartPulse className="size-3" aria-hidden />Medical</span></>}</p>
                                   <p className="mt-0.5 truncate text-xs text-muted-foreground">{invoice.extraction === "mock" && <span className="mr-1.5 font-semibold text-warn">Simulated ·</span>}{finding ? finding.title : `${invoice.number} · ${fmtDate(invoice.date)}`}</p>
                                 </div>
                                 <div className="flex shrink-0 flex-col items-end gap-1"><p className="num text-sm font-semibold leading-tight">{formatMoney(invoice.total, invoice.currency)}</p>
                                   {amountAtRisk.gt(0)
-                                    ? <span className={cn("num text-xs font-medium", "text-warn")}>{formatMoney(amountAtRisk, invoice.currency)} possible overcharge</span>
+                                    ? <span className={cn("num text-xs font-medium", "text-warn")}>{formatMoney(amountAtRisk, invoice.currency)}<span className="max-[420px]:sr-only"> possible overcharge</span><span aria-hidden className="min-[421px]:hidden"> possible</span></span>
                                     : <span className={cn("inline-flex items-center gap-1.5 text-xs font-medium", invoice.isCredit ? (creditPos.get(invoice.id)?.status === "settled" ? "text-ok" : "text-warn") : paymentStatusAt(invoice) === "overdue" ? "text-bad" : classification === "CLEAR" ? "text-ok" : "text-warn")}><span aria-hidden className="size-1.5 rounded-full bg-current" />{invoice.isCredit ? `Credit · ${creditPos.get(invoice.id)?.status === "settled" ? "settled" : creditPos.get(invoice.id)?.status === "unmatched" ? "unmatched" : "to confirm"}` : isSimulated(invoice) ? "Simulated example" : paymentStatusAt(invoice) === "overdue" ? "Past due" : classification === "CLEAR" ? "Clear" : "Review"}</span>}
                                 </div>
                               </Link>
@@ -305,7 +305,7 @@ export function InvoiceList() {
                   <tbody className="divide-y divide-line">
                     {pageRows.map(({ invoice, classification, finding, amountAtRisk }, i) => (
                       <MotionRow key={invoice.id} i={i} onClick={() => router.push(`/invoices/${invoice.id}`)} className="group cursor-pointer transition-colors hover:bg-primary-soft/35">
-                        <td className="px-5 py-4"><Link href={`/invoices/${invoice.id}`} className="font-semibold text-ink hover:text-primary hover:underline">{invoice.vendorName}</Link><div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground"><span>{invoice.number} · {fmtDate(invoice.date)}</span>{invoice.extraction === "mock" ? <Pill tone="warn" title="Figures are a scripted demo example, not read from your file">Simulated</Pill> : invoice.source === "upload" && <Pill tone="primary">Uploaded</Pill>}</div></td>
+                        <td className="px-5 py-4"><Link href={`/invoices/${invoice.id}`} className="font-semibold text-ink hover:text-primary hover:underline">{invoice.vendorName}</Link>{invoice.medical && <span className="ml-2"><span className="inline-flex items-center gap-1 rounded-md bg-sky-600/10 px-1.5 py-0.5 text-[11px] font-semibold text-sky-800 ring-1 ring-sky-600/30 dark:text-sky-200"><HeartPulse className="size-3" aria-hidden />Medical</span></span>}<div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground"><span>{invoice.number} · {fmtDate(invoice.date)}</span>{invoice.extraction === "mock" ? <Pill tone="warn" title="Figures are a scripted demo example, not read from your file">Simulated</Pill> : invoice.source === "upload" && <Pill tone="primary">Uploaded</Pill>}</div></td>
                         <td className="max-w-[320px] px-3 py-4"><p className="truncate text-sm text-ink">{invoice.isCredit ? "Credit note · not payable · not counted as spend" : finding?.title ?? "Nothing flagged"}</p>{!invoice.isCredit && paymentStatusAt(invoice) === "overdue" && <p className="mt-0.5 text-xs font-medium text-bad">Past due</p>}</td>
                         <td className="num px-3 py-4 text-right"><span className="font-semibold">{formatMoney(invoice.total, invoice.currency)}</span>{amountAtRisk.gt(0) && <p className="mt-0.5 text-xs font-medium text-warn">{formatMoney(amountAtRisk, invoice.currency)} possible overcharge</p>}</td>
                         <td className="px-5 py-4"><Link href={`/invoices/${invoice.id}`} className="inline-flex items-center gap-2">{invoice.isCredit ? (creditPos.get(invoice.id) ? <CreditStatusPill status={creditPos.get(invoice.id)!.status} /> : <Pill tone="info">Credit note</Pill>) : isSimulated(invoice) ? <Pill tone="bad">Simulated</Pill> : <ClassBadge value={classification} size="sm" />}<ArrowUpRight className="size-3.5 text-subtle opacity-0 transition-opacity group-hover:opacity-100" aria-hidden /></Link></td>

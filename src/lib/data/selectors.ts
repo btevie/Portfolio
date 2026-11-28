@@ -278,6 +278,7 @@ export function actionQueue(state: AppState, audits: Audits): QueueItem[] {
     .flatMap((finding) => { const invoice = byId.get(finding.invoiceId); return invoice && !isSimulated(invoice) ? [{ finding, invoice }] : []; })
     .sort((a, b) =>
       Number(paymentStatusAt(a.invoice) === "paid") - Number(paymentStatusAt(b.invoice) === "paid")
+      || Number(Boolean(b.invoice.medical)) - Number(Boolean(a.invoice.medical)) // medical bills first: a mistake there costs the most
       || sev[a.finding.severity] - sev[b.finding.severity]
       || a.invoice.dueDate.localeCompare(b.invoice.dueDate)
       || D(b.finding.amountAtRisk).comparedTo(D(a.finding.amountAtRisk)));

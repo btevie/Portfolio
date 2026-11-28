@@ -51,6 +51,8 @@ function invoice(x: unknown): x is Invoice {
     && dec(x.subtotal) && dec(x.discounts) && dec(x.fees) && dec(x.taxAmount) && dec(x.total) && optDec(x.taxRate)
     && oneOf(x.paymentStatus, PAYMENT) && oneOf(x.source, ["demo", "upload"] as const) && Number.isFinite(x.createdAt)
     && (x.extraction === undefined || oneOf(x.extraction, ["mock", "csv", "text", "pdf", "ocr"] as const))
+    && (x.medical === undefined || typeof x.medical === "boolean")
+    && (x.readNotes === undefined || (Array.isArray(x.readNotes) && x.readNotes.length <= 10 && x.readNotes.every((n) => str(n, 300))))
     && (x.uncertainFields === undefined || (Array.isArray(x.uncertainFields) && x.uncertainFields.length <= 10 && x.uncertainFields.every((k) => str(k, 30))))
     && (x.isCredit === undefined || typeof x.isCredit === "boolean");
 }

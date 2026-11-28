@@ -181,6 +181,9 @@
   html[data-theme="light"] { color-scheme: light; }
   body { @apply bg-background text-foreground font-sans antialiased; padding-bottom: env(safe-area-inset-bottom); -webkit-tap-highlight-color: transparent; }
   html { -webkit-text-size-adjust: 100%; }
+  html, body { overscroll-behavior-y: none; }
+  a, button, summary, label, [role=button], [role=tab] { touch-action: manipulation; }
+  @media (display-mode: standalone) { body { -webkit-user-select: none; user-select: none; } input, textarea, [data-selectable], p, td { -webkit-user-select: text; user-select: text; } }
 }
 
 /* Touch devices: every control gets a 44px hit area (UI UX Pro Max "touch-target-size"). */

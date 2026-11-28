@@ -16,7 +16,7 @@ describe("toAmount", () => {
 
 describe("parseStatement", () => {
   it("keeps only money going out, from a signed amount column", () => {
-    const r = parseStatement("Date,Description,Amount\n2026-11-03,NORTHWIND HOSTING NW-47,-166.98\n2026-11-04,SALARY IN,2500.00\n");
+    const r = parseStatement("Date,Description,Amount\n2026-11-03,NORTHWIND HOSTING NW-47,-166.98\n2026-11-04,SALARY IN,2500.00\n", { convention: "negative-out" });
     expect(r.txs).toHaveLength(1);
     expect(r.txs[0].amount).toBe("166.98");
   });
@@ -34,7 +34,7 @@ describe("findDuplicatePayments", () => {
   const inv = invoices.find((i) => i.vendorName.startsWith("Northwind"))!;
   it("flags one invoice paid twice and counts only the extra payment as refundable", () => {
     const stmt = `Date,Description,Amount\n2026-11-03,${inv.vendorName} ${inv.number},-${inv.total}\n2026-11-10,${inv.vendorName} ${inv.number},-${inv.total}\n`;
-    const dups = findDuplicatePayments(parseStatement(stmt).txs, invoices);
+    const dups = findDuplicatePayments(parseStatement(stmt, { convention: "negative-out" }).txs, invoices);
     expect(dups).toHaveLength(1);
     expect(dups[0].kind).toBe("same-invoice");
     expect(dups[0].refundable.toFixed(2)).toBe(Number(inv.total).toFixed(2));
@@ -44,16 +44,16 @@ describe("findDuplicatePayments", () => {
     const total = same[0].total;
     const n = same.filter((i) => i.total === total).length;
     const stmt = "Date,Description,Amount\n" + Array.from({ length: n }, (_, k) => `2026-0${k + 1}-03,NORTHWIND HOSTING,-${total}`).join("\n");
-    expect(findDuplicatePayments(parseStatement(stmt).txs, invoices)).toHaveLength(0);
+    expect(findDuplicatePayments(parseStatement(stmt, { convention: "negative-out" }).txs, invoices)).toHaveLength(0);
     const extra = stmt + `\n2026-11-03,NORTHWIND HOSTING,-${total}`;
-    expect(findDuplicatePayments(parseStatement(extra).txs, invoices)[0]?.refundable.toFixed(2)).toBe(Number(total).toFixed(2));
+    expect(findDuplicatePayments(parseStatement(extra, { convention: "negative-out" }).txs, invoices)[0]?.refundable.toFixed(2)).toBe(Number(total).toFixed(2));
   });
   it("does not flag a single payment", () => {
     const stmt = `Date,Description,Amount\n2026-11-03,${inv.vendorName},-${inv.total}\n`;
-    expect(findDuplicatePayments(parseStatement(stmt).txs, invoices)).toHaveLength(0);
+    expect(findDuplicatePayments(parseStatement(stmt, { convention: "negative-out" }).txs, invoices)).toHaveLength(0);
   });
   it("flags the same charge twice in a week even with no matching invoice", () => {
-    const dups = findDuplicatePayments(parseStatement("Date,Description,Amount\n2026-11-03,ACME TOOLS,-40.00\n2026-11-05,ACME TOOLS,-40.00\n").txs, invoices);
+    const dups = findDuplicatePayments(parseStatement("Date,Description,Amount\n2026-11-03,ACME TOOLS,-40.00\n2026-11-05,ACME TOOLS,-40.00\n", { convention: "negative-out" }).txs, invoices);
     expect(dups[0].kind).toBe("repeat-charge");
   });
 });
@@ -83,7 +83,7 @@ describe("sign conventions", () => {
     expect(r.incoming.map((t) => t.amount)).toEqual(["2500.00"]);
   });
   it("explains unreadable rows instead of dropping them", () => {
-    const r = parseStatement("Date,Description,Amount\nsoon,ACME,-40.00\n2026-11-03,ACME,lots\n2026-11-04,OK,-1.00\n");
+    const r = parseStatement("Date,Description,Amount\nsoon,ACME,-40.00\n2026-11-03,ACME,lots\n2026-11-04,OK,-1.00\n", { convention: "negative-out" });
     expect(r.unreadable.map((u) => u.line)).toEqual([2, 3]);
     expect(r.unreadable[0].reason).toMatch(/Date/);
     expect(r.unreadable[1].reason).toMatch(/not a number/);
@@ -95,7 +95,7 @@ describe("match evidence and corrections", () => {
   const invoices = createSeedState().invoices;
   const inv = invoices.find((i) => i.vendorName.startsWith("Northwind"))!;
   const stmt = `Date,Description,Amount\n2026-11-03,${inv.vendorName} ${inv.number},-${inv.total}\n2026-11-10,${inv.vendorName} ${inv.number},-${inv.total}\n`;
-  const dups = findDuplicatePayments(parseStatement(stmt).txs, invoices);
+  const dups = findDuplicatePayments(parseStatement(stmt, { convention: "negative-out" }).txs, invoices);
   it("carries strength and reasons, never 'confirmed'", () => {
     expect(dups[0].strength).toBe("strong");
     expect(dups[0].reasons.length).toBeGreaterThan(1);
@@ -166,7 +166,7 @@ describe("findDuplicatePayments capacity", () => {
   const inv = invoices.find((i) => i.vendorName.startsWith("Northwind"))!;
   it("counts two numbered payments and one vendor-only payment against one invoice as two extra payments in total", () => {
     const stmt = `Date,Description,Amount\n2026-11-03,${inv.vendorName} ${inv.number},-${inv.total}\n2026-11-10,${inv.vendorName} ${inv.number},-${inv.total}\n2026-11-17,${inv.vendorName},-${inv.total}\n`;
-    const dups = findDuplicatePayments(parseStatement(stmt).txs, [inv]); // exactly one invoice on file
+    const dups = findDuplicatePayments(parseStatement(stmt, { convention: "negative-out" }).txs, [inv]); // exactly one invoice on file
     const refundable = dups.reduce((t, d) => t.plus(d.refundable), D(0));
     expect(refundable.toFixed(2)).toBe(D(inv.total).times(2).toFixed(2));
     const lines = dups.flatMap((d) => d.txs.map((t) => t.line));
@@ -184,5 +184,47 @@ describe("suggestion ids", () => {
     expect(a).toHaveLength(1);
     expect(b).toHaveLength(1);
     expect(a[0].id).not.toBe(b[0].id);
+  });
+});
+
+describe("parseStatement is forgiving about format", () => {
+  it("reads rows with no header row", () => {
+    const r = parseStatement("03/11/2026,NORTHWIND HOSTING NW-47,-166.98\n04/11/2026,SALARY,2500.00\n05/11/2026,ORBIT WORKSPACE,-338.80\n", { convention: "negative-out" });
+    expect(r.error).toBeUndefined();
+    expect(r.txs.map((t) => t.amount)).toEqual(["166.98", "338.80"]);
+    expect(r.txs[0].date).toBe("2026-11-03");
+  });
+  it("reads rows copied from a web page, separated by tabs or runs of spaces", () => {
+    const tabs = parseStatement("12 Nov 2026\tBrightline Telecom\t-74.42\n13 Nov 2026\tCoffee\t-3.50\n", { convention: "negative-out" });
+    expect(tabs.txs).toHaveLength(2);
+    expect(tabs.txs[0].date).toBe("2026-11-12");
+    const spaced = parseStatement("2026/11/12   Brightline Telecom   -74.42\n2026/11/13   Coffee   -3.50\n", { convention: "negative-out" });
+    expect(spaced.txs.map((t) => t.amount)).toEqual(["74.42", "3.50"]);
+  });
+  it("still refuses text that is not a statement", () => {
+    expect(parseStatement("hello\nworld").error).toBeTruthy();
+  });
+});
+
+describe("single Amount column: direction is never assumed", () => {
+  const card = "Date,Description,Amount\n2026-11-02,ACME HOSTING,40.00\n2026-11-03,ACME HOSTING,40.00\n2026-11-04,REFUND ACME,-40.00\n";
+  const bank = "Date,Description,Amount\n2026-11-02,ACME HOSTING,-40.00\n2026-11-03,CUSTOMER PAYMENT,500.00\n";
+  it("asks instead of guessing, and suggests the likelier reading", () => {
+    const c = parseStatement(card);
+    expect(c.ambiguous).toBe(true);
+    expect(c.txs).toEqual([]);
+    expect(c.suggested).toBe("positive-out"); // the negative row is a refund
+    expect(parseStatement(bank).ambiguous).toBe(true);
+    expect(parseStatement(bank).suggested).toBe("negative-out");
+  });
+  it("with the card convention, the refund is incoming and the two purchases are payments", () => {
+    const r = parseStatement(card, { convention: "positive-out" });
+    expect(r.txs.map((t) => t.description)).toEqual(["ACME HOSTING", "ACME HOSTING"]);
+    expect(r.incoming.map((t) => t.description)).toEqual(["REFUND ACME"]);
+  });
+  it("gives files with the same columns the same signature", async () => {
+    const { statementSignature } = await import("./match");
+    expect(statementSignature(card)).toBe(statementSignature(bank));
+    expect(statementSignature("Date;Omschrijving;Bedrag\n")).not.toBe(statementSignature(card));
   });
 });

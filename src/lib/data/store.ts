@@ -99,6 +99,10 @@ export const actions = {
       return pruneCredits({ ...s, invoices: s.invoices.filter((i) => i.id !== id), decisions, recovery }, creditCtx());
     });
   },
+  /** The person's own call on whether a bill is medical. Medical bills get extra checks and are never marked clear to pay automatically. */
+  setMedical(id: string, medical: boolean) {
+    update((s) => ({ ...s, invoices: s.invoices.map((i) => { if (i.id !== id) return i; const { medical: _m, ...rest } = i; void _m; return medical ? { ...rest, medical: true } : rest; }) }));
+  },
   /** The user's own record of whether they paid. "overdue" is derived from the due date, never stored by hand. */
   setPaymentStatus(id: string, paymentStatus: "paid" | "unpaid") {
     update((s) => ({ ...s, invoices: s.invoices.map((i) => (i.id === id ? { ...i, paymentStatus } : i)) }));

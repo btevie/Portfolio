@@ -101,3 +101,67 @@ describe("fuzzed invoices", () => {
     expect(openFindings(state, audits).every((f) => f.invoiceId.startsWith("fz-") || f.invoiceId.startsWith("inv-"))).toBe(true);
   });
 });
+
+describe("currency precision", () => {
+  it("shows each currency with its own number of decimals", async () => {
+    const { formatMoney } = await import("./audit/money");
+    const sp = (x: string) => x.replace(/\s/g, " ");
+    expect(sp(formatMoney("1234.567", "BHD"))).toBe("BHD 1,234.567");
+    expect(sp(formatMoney("1234.567", "KWD"))).toBe("KWD 1,234.567");
+    expect(formatMoney("1234.567", "JPY")).toMatch(/1,235$/);
+    expect(formatMoney("1234.567", "EUR")).toBe("€1,234.57");
+    expect(formatMoney("-0.004", "EUR")).toBe("€0.00");
+  });
+  it("keeps a 3-decimal statement amount exact so it still matches the invoice", async () => {
+    const { parseStatement } = await import("./payments/match");
+    const r = parseStatement("Date,Description,Amount\n2026-11-02,ACME,-12.345\n2026-11-03,ACME,-12.5\n", { convention: "negative-out" });
+    expect(r.txs.map((t) => t.amount)).toEqual(["12.345", "12.50"]);
+  });
+});
+
+describe("corrupted or hostile saved data", () => {
+  it("never throws, and whatever loads can be audited", () => {
+    const base = JSON.parse(JSON.stringify(createSeedState()));
+    const r = rng(99);
+    const junk: unknown[] = [null, undefined, "x", 0, -1, 1e308, [], {}, true, "<script>", "9".repeat(5000), { __proto__: { polluted: true } }, "2026-02-30", NaN];
+    const paths = (o: unknown, p: (string | number)[] = []): (string | number)[][] => (o && typeof o === "object" ? Object.entries(o as object).flatMap(([k, v]) => paths(v, [...p, Array.isArray(o) ? Number(k) : k])) : [p]);
+    const all = paths(base);
+    let loaded = 0;
+    for (let n = 0; n < 300; n++) {
+      const copy = JSON.parse(JSON.stringify(base));
+      for (let m = 0; m < 1 + Math.floor(r() * 4); m++) {
+        const path = all[Math.floor(r() * all.length)];
+        let cur = copy;
+        for (const k of path.slice(0, -1)) { if (cur?.[k] === undefined) break; cur = cur[k]; }
+        const last = path[path.length - 1];
+        if (cur && typeof cur === "object") { if (r() < 0.2) delete cur[last]; else cur[last] = junk[Math.floor(r() * junk.length)]; }
+      }
+      const raw = JSON.stringify(copy);
+      const parsed = parseStoredState(raw);
+      if (!parsed) continue;
+      loaded++;
+      const audits = auditAll(parsed.state); // must not throw on anything that loaded
+      expect(Object.keys(audits).length).toBe(parsed.state.invoices.length);
+      expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+      for (const i of parsed.state.invoices) expect(isValidDecimal(i.total)).toBe(true);
+    }
+    expect(loaded).toBeGreaterThan(50);
+  });
+});
+
+describe("order independence", () => {
+  it("gives the same findings however the invoices are ordered", () => {
+    const s = createSeedState();
+    const r = rng(5);
+    const shuffled = [...s.invoices].sort(() => r() - 0.5);
+    const key = (st: AppState) => Object.values(auditAll(st)).flatMap((a) => a.findings.map((f) => `${f.invoiceId}|${f.id}|${f.amountAtRisk}|${f.severity}`)).sort();
+    expect(key({ ...s, invoices: shuffled })).toEqual(key(s));
+  });
+  it("gives the same recurring-bill signals however the invoices are ordered", async () => {
+    const { recurringSignals } = await import("./recurring-watch");
+    const s = createSeedState();
+    const sig = (inv: Invoice[]) => recurringSignals(inv, "2026-12-20").map((x) => `${x.vendorId}|${x.kind}|${x.headline}`).sort();
+    const r = rng(11);
+    expect(sig([...s.invoices].sort(() => r() - 0.5))).toEqual(sig(s.invoices));
+  });
+});

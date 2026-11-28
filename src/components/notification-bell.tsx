@@ -1,10 +1,11 @@
 "use client";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
-import { Bell, CheckCheck, Clock3, MessageCircle } from "lucide-react";
+import { Bell, CalendarPlus, CheckCheck, Clock3, MessageCircle } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { activeReminders } from "@/lib/data/selectors";
 import { useAudited } from "@/lib/data/hooks";
+import { buildIcs, upcomingDeadlines } from "@/lib/deadlines";
 import { cn } from "@/lib/cn";
 
 const READ_KEY = "overbill:notifications:read:v1";
@@ -71,6 +72,13 @@ export function NotificationBell({ className }: { className?: string }) {
   };
   const markRead = (id: string) => persistRead([...readIds, id]);
   const markAllRead = () => persistRead(reminders.map((n) => n.id));
+  const exportCalendar = () => {
+    // Built on this device and handed to the OS calendar, which then delivers the reminders (no server, no push subscription).
+    const url = URL.createObjectURL(new Blob([buildIcs(upcomingDeadlines(state, audits))], { type: "text/calendar" }));
+    const a = Object.assign(document.createElement("a"), { href: url, download: "overbill-deadlines.ics" });
+    a.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
   const icon = (kind: string) => kind === "due" ? Clock3 : kind === "reply" ? MessageCircle : Bell;
 
   return (
@@ -108,6 +116,10 @@ export function NotificationBell({ className }: { className?: string }) {
                 </ul>
               )}
             </div>
+            <footer className="border-t px-4 py-2">
+              <button type="button" onClick={exportCalendar} className="inline-flex min-h-9 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-primary hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><CalendarPlus className="size-4" aria-hidden />Add deadlines to your calendar</button>
+              <p className="px-2 text-[11px] text-muted-foreground">Your phone or Mac will remind you. Nothing is sent anywhere.</p>
+            </footer>
           </motion.section>
         )}
       </AnimatePresence>

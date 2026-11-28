@@ -11,6 +11,12 @@ export default function manifest(): MetadataRoute.Manifest {
     display: "standalone",
     background_color: "#020617",
     theme_color: "#15803d",
+    orientation: "portrait",
+    shortcuts: [
+      { name: "Check an invoice", url: "/invoices/new" },
+      { name: "Pay run", url: "/pay-run" },
+      { name: "Recovery", url: "/recovery" },
+    ],
     icons: [
       { src: "/icon-192.png", sizes: "192x192", type: "image/png" },
       { src: "/icon-512.png", sizes: "512x512", type: "image/png" },
