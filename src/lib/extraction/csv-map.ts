@@ -40,6 +40,8 @@ export interface CsvAnalysis {
   /** Why confirmation is needed, or "remembered" / "exact" when it is not. */
   basis: "exact" | "remembered" | "guessed";
   signature: string;
+  /** The file exactly as read. `map` indexes columns of this text, never of a remembered mapping's rewritten `text`. */
+  source: string;
   /** The original text. */
   text: string;
 }
@@ -65,7 +67,7 @@ export function analyzeCsv(text: string): CsvAnalysis {
   const headers = (rows[0] ?? []).map((h) => h.trim());
   const heads = headers.map(norm);
   const signature = [...heads].sort().join("|");
-  const base = { headers, sample: rows.slice(1, 4), signature, text };
+  const base = { headers, sample: rows.slice(1, 4), signature, text, source: text };
   const exact: CsvMap = {};
   const used = new Set<number>();
   for (const f of CSV_FIELDS) { const i = heads.indexOf(f.key); if (i >= 0 && !used.has(i)) { exact[f.key] = i; used.add(i); } else exact[f.key] = null; }
@@ -74,7 +76,8 @@ export function analyzeCsv(text: string): CsvAnalysis {
     return { ...base, status: "ready", map: exact, basis: "exact" };
   }
   const saved = readSaved()[signature];
-  if (saved) {
+  // Repeated header names make a remembered column name ambiguous (which "Price"?), so ask again instead of guessing.
+  if (saved && new Set(heads).size === heads.length) {
     const m: CsvMap = {};
     for (const f of CSV_FIELDS) { const name = saved[f.key]; const i = name === undefined ? -1 : heads.indexOf(name); m[f.key] = i >= 0 ? i : null; }
     if (requiredOk(m)) return { ...base, status: "ready", map: m, basis: "remembered", text: applyCsvMapping(text, headers, rows, m) };
@@ -100,9 +103,9 @@ export function applyCsvMapping(_text: string, _headers: string[], rows: string[
 }
 
 export function mappedText(a: CsvAnalysis, map: CsvMap): string {
-  const content = a.text.replace(/^﻿/, "");
+  const content = a.source.replace(/^﻿/, "");
   const rows = splitCsv(content, detectDelimiter(content)).filter((r) => r.some((c) => c.trim() !== ""));
-  return applyCsvMapping(a.text, a.headers, rows, map);
+  return applyCsvMapping(a.source, a.headers, rows, map);
 }
 
 export const missingRequired = (map: CsvMap) => CSV_FIELDS.filter((f) => f.required && (map[f.key] === null || map[f.key] === undefined)).map((f) => f.label);

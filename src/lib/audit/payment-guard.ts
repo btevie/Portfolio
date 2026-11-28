@@ -71,12 +71,19 @@ export function paymentGuardFindings(inv: Invoice, ctx: AuditContext): AuditFind
 
   // 2. Vendor Bank-Account Swap (Business Email Compromise / Invoice Hijacking) check
   const prior = priorInvoices(inv, ctx);
+  // An account is trusted only if it is the first one this vendor ever used on file, or it has been used on at least two earlier invoices.
+  // An account that appeared for the first time on a later invoice (a possible swap) therefore keeps being flagged on the next invoice too,
+  // instead of becoming "known" just because the unconfirmed invoice is now history.
   const historicalIbans = new Set<string>();
+  const uses = new Map<string, number>();
+  let baselineSeen = false;
   for (const p of prior) {
-    for (const oldIban of extractIbans(p)) {
-      if (isValidIbanMod97(oldIban)) historicalIbans.add(oldIban);
-    }
+    const valid = [...new Set(extractIbans(p).filter(isValidIbanMod97))];
+    if (!valid.length) continue;
+    for (const oldIban of valid) uses.set(oldIban, (uses.get(oldIban) ?? 0) + 1);
+    if (!baselineSeen) { baselineSeen = true; valid.forEach((i) => historicalIbans.add(i)); }
   }
+  for (const [iban, n] of uses) if (n >= 2) historicalIbans.add(iban);
 
   if (historicalIbans.size > 0) {
     for (const iban of currentIbans) {

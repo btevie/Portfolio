@@ -106,6 +106,11 @@ export function linkCandidates(state: Pick<AppState, "invoices">, credit: Invoic
 
 export const billLabel = (i: Invoice) => `${i.vendorName} · ${i.number}`;
 
+/** Most events saved data may hold for one credit note. It sits far above anything the app records, so a real history is never rejected on reload. */
+export const MAX_CREDIT_EVENTS = 100_000;
+/** Notes are the only unbounded input, so they stop well short of the limit; settlements, links and reversals keep their room. */
+const MAX_CREDIT_NOTES = 2_000;
+
 export type CreditResult = { ok: true; state: AppState } | { ok: false; error: string };
 type Ctx = { id: () => string; now: () => string };
 
@@ -203,6 +208,7 @@ export function addCreditNote(state: AppState, creditId: string, text: string, c
   const t = text.trim();
   if (!t) return { ok: false, error: "Write a note first." };
   if (t.length > 1000) return { ok: false, error: "That note is too long." };
+  if ((state.credits.find((c) => c.creditId === creditId)?.events.filter((e) => e.kind === "note").length ?? 0) >= MAX_CREDIT_NOTES) return { ok: false, error: "This credit note has the maximum number of notes. Existing entries are kept." };
   return { ok: true, state: withRecord(state, creditId, (r) => ({ ...r, events: [...r.events, { id: ctx.id(), at: ctx.now(), kind: "note", text: t }] })) };
 }
 

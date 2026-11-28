@@ -362,7 +362,9 @@ export function nextActions(state: AppState, audits: Audits, now = Date.now()): 
   return out.sort((a, b) =>
     TIER[a.urgency] - TIER[b.urgency]
     || SEV[a.severity] - SEV[b.severity]
-    || (a.amount && b.amount && a.amount.currency === b.amount.currency ? D(b.amount.value).comparedTo(D(a.amount.value)) : 0)
+    // Amounts are only comparable inside one currency, so group by currency first: a consistent order, with no cross-currency comparison.
+    || (a.amount?.currency ?? "").localeCompare(b.amount?.currency ?? "")
+    || (a.amount && b.amount ? D(b.amount.value).comparedTo(D(a.amount.value)) : 0)
     || (a.days ?? 9999) - (b.days ?? 9999));
 }
 

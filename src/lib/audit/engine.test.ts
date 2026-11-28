@@ -170,7 +170,7 @@ describe("historical price comparison", () => {
     expect(high.classification).toBe("REVIEW_NEEDED");
   });
   it("explains confidence in the change separately from confidence it is an error", () => {
-    const f = run("115.00").findings[0];
+    const f = run("108.00").findings[0]; // under the 15% level where the price rule suggests an expired promotion instead
     expect(f.confidence).toBe("high");
     expect(f.confidenceReason).toMatch(/identical/);
     expect(f.uncertainty).toMatch(/changed their pricing/);
@@ -267,5 +267,16 @@ describe("classification & demo story", () => {
     const inv = s.invoices.find((i) => i.id === "inv-stackly-4")!;
     const r = auditInvoice(inv, { today: "2026-11-26", invoices: s.invoices, contractRates: [], vendor: undefined, config: { ...DEFAULT_CONFIG, disabledRules: ["arithmetic"] } });
     expect(r.findings).toEqual([]);
+  });
+});
+
+describe("findingNamesLine", () => {
+  it("does not confuse a line with another whose id starts the same", async () => {
+    const { findingNamesLine } = await import("./engine");
+    expect(findingNamesLine("inv:contract_rate:rate-cr-inv-l10", "inv-l10")).toBe(true);
+    expect(findingNamesLine("inv:contract_rate:rate-cr-inv-l10", "inv-l1")).toBe(false);
+    expect(findingNamesLine("inv:arithmetic:line-inv-l10", "inv-l1")).toBe(false);
+    expect(findingNamesLine("inv:arithmetic:line-inv-l1", "inv-l1")).toBe(true);
+    expect(findingNamesLine("inv:arithmetic:subtotal", "inv-l1")).toBe(false);
   });
 });

@@ -1,6 +1,6 @@
 import type { AuditFinding, Invoice } from "../types";
 import { priorInvoices } from "./history";
-import { D, formatMoney, str2 } from "./money";
+import { D, formatMoney } from "./money";
 import { normalizeDescription } from "./normalize";
 import type { AuditContext } from "./types";
 import { makeFinding, taxFactor, withTax } from "./rules/util";

@@ -57,7 +57,9 @@ export function FileDropzone({ onFiles, accept, multiple = true, disabled, label
     if (!multiple && items.length > 1) return "reject";
     // Drag items expose a MIME type but no file name, so an extension-only `accept` (".pdf,.csv") cannot be judged here; the drop is validated afterwards.
     const mimeRules = (accept ?? "").split(",").some((a) => a.trim().includes("/"));
-    return !mimeRules || items.every((i) => !i.type || matches(accept, i.type)) ? "accept" : "reject";
+    // An extension rule next to MIME rules (".csv,application/pdf") can match a file the drag cannot show a name for, so an unmatched type stays undecided until drop.
+    const extensionRules = (accept ?? "").split(",").some((a) => a.trim().startsWith("."));
+    return !mimeRules || extensionRules || items.every((i) => !i.type || matches(accept, i.type)) ? "accept" : "reject";
   };
 
   const over = drag !== "idle";
@@ -71,7 +73,7 @@ export function FileDropzone({ onFiles, accept, multiple = true, disabled, label
         htmlFor={id} role="button" tabIndex={disabled ? -1 : 0} aria-disabled={disabled || undefined} aria-describedby={`${id}-hint`} data-drag={drag}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } }}
         onDragEnter={(e) => { e.preventDefault(); if (disabled) return; depth.current += 1; setDrag(dragKind(e)); }}
-        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = reject || disabled ? "none" : "copy"; }}
+        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = disabled ? "none" : "copy"; /* rejected files still need to reach onFiles so the app can say why */ }}
         onDragLeave={() => { depth.current = Math.max(0, depth.current - 1); if (depth.current === 0) setDrag("idle"); }}
         onDrop={(e) => { e.preventDefault(); depth.current = 0; setDrag("idle"); if (!disabled && e.dataTransfer.files?.length) add(e.dataTransfer.files); }}
         className={cn(

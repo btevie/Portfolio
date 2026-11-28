@@ -124,11 +124,10 @@ describe("nextActions follow-ups", () => {
     const audits = auditAll(state);
     const f = Object.values(audits).flatMap((a) => a.findings)[0];
     const inv = state.invoices.find((i) => i.id === f.invoiceId)!;
-    const s = {
-      ...state,
-      invoices: state.invoices.map((i) => (i.id === inv.id ? { ...i, paymentStatus: "paid" as const } : i)),
-      recovery: [{ id: "rc1", vendorId: inv.vendorId, vendorName: inv.vendorName, invoiceId: inv.id, findingId: f.id, title: "Test case", amount: "100.00", currency: inv.currency, status: "credit_issued" as const, notes: "", createdAt: "2026-01-01", updatedAt: "2026-01-02", confirmedAmount: "80.00", recoveredAmount: "30.00", followUpDate: "2026-01-05" }],
-    };
+    const mk = (id: string, finding: AuditFinding, over: Partial<RecoveryRecord> = {}): RecoveryRecord => ({ id, vendorId: inv.vendorId, vendorName: inv.vendorName, invoiceId: inv.id, findingId: finding.id, title: "Test case", amount: "100.00", currency: inv.currency, status: "disputed", notes: "", createdAt: "2026-01-01", updatedAt: "2026-01-02", ...over });
+    // Every finding on the paid invoice has its own case; the first one has a promise and a follow-up date in the past.
+    const cases = audits[inv.id].findings.map((x, n) => (n === 0 ? mk("rc1", x, { status: "credit_issued", confirmedAmount: "80.00", recoveredAmount: "30.00", followUpDate: "2026-01-05" }) : mk(`rc${n + 1}`, x, { followUpDate: "2099-01-01" })));
+    const s = { ...state, invoices: state.invoices.map((i) => (i.id === inv.id ? { ...i, paymentStatus: "paid" as const } : i)), recovery: cases };
     const list = nextActions(s, auditAll(s));
     const c = list.find((a) => a.id === "case:rc1")!;
     expect(c.dated).toBe(true);

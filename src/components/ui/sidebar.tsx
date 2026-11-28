@@ -94,10 +94,9 @@ function FadingLabel({ show, className, children }: { show: boolean; className?:
 
 export function SidebarHeader({ className, children, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   const { collapsed } = useSidebarContext();
-  const visible = collapsed ? React.Children.toArray(children).filter((c) => !(React.isValidElement(c) && c.type === SidebarToggle)) : children;
   return (
     <div data-slot="sidebar-header" className={cn("flex shrink-0 items-center", collapsed ? "flex-col justify-center gap-2 px-0 py-3" : "h-14 gap-2.5 px-4", className)} {...props}>
-      {visible}
+      {children /* the toggle stays in the collapsed header: it is the only way to expand an uncontrolled sidebar */}
     </div>
   );
 }
@@ -156,7 +155,7 @@ export function SidebarItem({ className, icon, active = false, badge, asChild = 
       {icon ? <span className="relative z-10 flex size-5 shrink-0 items-center justify-center">{icon}</span> : null}
       <FadingLabel show={!collapsed} className="relative z-10 min-w-0 flex-1 truncate text-left">{text}</FadingLabel>
       {badge ? <FadingLabel show={!collapsed} className="relative z-10 flex shrink-0 items-center">{badge}</FadingLabel> : null}
-      {collapsed && label ? <span className="sr-only">{label}</span> : null}
+      {collapsed && (label || text) ? <span className="sr-only">{label || text}</span> : null}
     </>
   );
 

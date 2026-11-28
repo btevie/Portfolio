@@ -35,8 +35,11 @@ export interface KitLine { description: string; quantity: string; unitPrice: str
 
 /** The invoice lines a finding is about. Invoice-level findings (duplicates, subtotal, dates) have none. */
 export function relatedLines(invoice: Invoice, f: AuditFinding): InvoiceLineItem[] {
+  // Match the whole line id at the end of the finding id: "...-i-l1" must not also select "i-l10".
+  const byId = invoice.lineItems.filter((l) => f.id.endsWith(`-${l.id}`) || f.id.endsWith(`:${l.id}`));
+  if (byId.length) return byId;
   const text = `${f.title}\n${f.evidence.join("\n")}`;
-  return invoice.lineItems.filter((l) => f.id.includes(`line-${l.id}`) || f.id.endsWith(`-${l.id}`) || (l.description.length >= 3 && text.includes(`"${l.description}"`)));
+  return invoice.lineItems.filter((l) => l.description.length >= 3 && text.includes(`"${l.description}"`));
 }
 
 export interface DisputeKit {
@@ -65,7 +68,7 @@ function trapSpecificGuidance(f: AuditFinding): string | null {
     return "Under Dutch and EU commercial practice, standard annual indexation clauses follow official CBS CPI / EU HICP inflation rates rather than discretionary surcharges above inflation.";
   }
   if (f.id.includes("reverse-charge")) {
-    return "As a VAT-registered EU business (B2B), cross-border supplies should be billed at 0% VAT under the EU reverse-charge mechanism (BTW verlegd) with our VAT ID listed on the invoice.";
+    return "If this is a business-to-business supply and we are VAT-registered in the EU, my understanding is that it should be invoiced at 0% VAT under the EU reverse-charge mechanism (BTW verlegd), with our VAT ID shown on the invoice.";
   }
   if (f.id.includes("nl-vat9")) {
     return "Under Dutch VAT rules (Tabel I Wet OB), food, non-alcoholic catering, books, and passenger transport generally qualify for the reduced 9% BTW rate rather than 21%.";
@@ -119,7 +122,7 @@ export function buildDisputeKit(invoice: Invoice, f: AuditFinding, decision: Fin
     `Hello ${invoice.vendorName} team,`,
     "",
     `I'm reviewing invoice ${invoice.number} dated ${fmtDate(invoice.date)} for ${money(invoice.total)}${lineRef}. ${confirmed ? "Our records show" : "It appears that"}: ${f.explanation}`,
-    ...(legalNote ? ["", legalNote] : []),
+    ...(legalNote ? ["", `For reference, my understanding of the rules (please correct me if I have this wrong): ${legalNote}`] : []),
     ...(hasCompare ? ["", `Expected: ${f.expected} · Invoiced: ${f.actual} · Difference: ${f.difference}`] : []),
     ...(amountAtStake ? [`The amount in question is up to ${amountAtStake} including tax.`] : []),
     "",

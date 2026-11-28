@@ -132,10 +132,18 @@ export function Dashboard() {
   const limit = (s: (typeof stats)[number]) => (s.vendor.billing === "variable" ? 15 : 5);
   const moved = stats.filter((s) => s.changePct !== null && s.changePct >= 5 && s.vendor.monitoring.enabled).sort((a, b) => b.changePct! - a.changePct!);
 
+  const creditBanner = creditsToDo.length > 0 && (
+        <section aria-label="Credit notes to resolve" className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border bg-card px-4 py-3 text-sm">
+          <p><strong>{creditsToDo.length} credit note{creditsToDo.length === 1 ? "" : "s"} to resolve.</strong> <span className="text-muted-foreground">{formatBalances(creditBalanceByCurrency(creditsToDo))} not yet confirmed applied or refunded. Not counted in spending.</span></p>
+          <Link href="/invoices?status=credits" className="inline-flex min-h-11 items-center font-medium text-primary hover:underline">Review credit notes</Link>
+        </section>
+  );
+
   if (!state.invoices.some((i) => !i.isCredit)) {
     return (
       <>
         <PageHeader title="Dashboard" />
+        {creditBanner}
         <Card><EmptyState icon={Inbox} title="Your invoice history starts here" action={<div className="flex flex-wrap justify-center gap-2"><LinkButton href="/invoices/new" variant="primary"><Upload className="size-4" />Upload your first invoice</LinkButton><LinkButton href="/demo">Try sample data</LinkButton></div>}>
           Upload your first bill to establish a baseline and catch unexpected charges.
         </EmptyState></Card>
@@ -164,12 +172,7 @@ export function Dashboard() {
         </Link>
       )}
 
-      {creditsToDo.length > 0 && (
-        <section aria-label="Credit notes to resolve" className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border bg-card px-4 py-3 text-sm">
-          <p><strong>{creditsToDo.length} credit note{creditsToDo.length === 1 ? "" : "s"} to resolve.</strong> <span className="text-muted-foreground">{formatBalances(creditBalanceByCurrency(creditsToDo))} not yet confirmed applied or refunded. Not counted in spending.</span></p>
-          <Link href="/invoices?status=credits" className="inline-flex min-h-11 items-center font-medium text-primary hover:underline">Review credit notes</Link>
-        </section>
-      )}
+      {creditBanner}
 
       <GetStarted steps={[
         { label: "Check one of your own invoices", done: state.invoices.some((i) => i.source === "upload" && !i.isCredit && !isSimulated(i)), href: "/invoices/new" },

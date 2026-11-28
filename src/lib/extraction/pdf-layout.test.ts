@@ -75,3 +75,57 @@ describe("pdfLinesToText regressions", () => {
     expect(t).toContain("Shipping | 1 | 5.00 | 5.00");
   });
 });
+
+describe("pdfLinesToText totals", () => {
+  it("keeps space-grouped amounts whole and prefers the final total over qualified ones", () => {
+    const out = pdfLinesToText(["Total before discount 1 500,00", "Total EUR 1 234,56"]);
+    expect(out).toContain("Total: 1234,56");
+    expect(out).not.toContain("Total: 1500");
+  });
+});
+
+describe("pdfLinesToText currency after a label", () => {
+  it("finds EUR even when 'VAT' comes first", () => {
+    expect(pdfLinesToText(["Acme", "Total incl. VAT EUR 145.44"])).toContain("Currency: EUR");
+  });
+});
+
+describe("pdfLinesToText review fixes", () => {
+  it("adds separate VAT lines and does not apply one rate to every item", () => {
+    const t = pdfLinesToText(["Acme", "Widget 1 100.00 100.00", "Gadget 1 100.00 100.00", "VAT 9% 9.00", "VAT 21% 21.00", "Total 230.00"]);
+    expect(t).toContain("Tax: 30.00");
+    expect(t).not.toContain("Tax rate");
+  });
+  it("keeps a single VAT rate", () => {
+    expect(pdfLinesToText(["Acme", "Widget 1 100.00 100.00", "VAT 21% 21.00", "Total 121.00"])).toContain("Tax rate: 21");
+  });
+  it("reads item rows that end with a currency code", () => {
+    expect(pdfLinesToText(["Acme", "Hosting 1 10.00 10.00 EUR", "Total 10.00"])).toContain("Hosting | 1 | 10.00 | 10.00");
+  });
+  it("keeps items whose description starts with a keyword", () => {
+    expect(pdfLinesToText(["Acme", "Shipping boxes 2 5.00 10.00", "Total 10.00"])).toContain("Shipping boxes | 2 | 5.00 | 10.00");
+  });
+});
+
+describe("pdfLinesToText: totals and tax edge cases", () => {
+  it("keeps a total that has the currency code after the amount", () => {
+    expect(pdfLinesToText(["Acme BV", "Total 121.00 EUR"])).toContain("Total: 121.00");
+    expect(pdfLinesToText(["Acme BV", "Total EUR 121.00"])).toContain("Total: 121.00");
+    expect(pdfLinesToText(["Acme BV", "Total EUR 121.00"])).toContain("Currency: EUR");
+  });
+  it("does not take a running total as the final total, however the spaces fall", () => {
+    const t = pdfLinesToText(["Acme BV", "Total so far 50.00", "Total 100.00"]);
+    expect(t).toContain("Total: 100.00");
+    expect(t).not.toContain("Total: 50.00");
+  });
+  it("adds comma-decimal tax lines correctly", () => {
+    expect(pdfLinesToText(["Acme BV", "VAT 9% 9,00", "VAT 21% 21,00", "Total 130,00"])).toContain("Tax: 30.00");
+  });
+});
+
+describe("pdfLinesToText signs", () => {
+  it("keeps the minus sign on a space-grouped amount", () => {
+    expect(pdfLinesToText(["Credit", "Total -1 234,56"])).toMatch(/Total[^\n]*-1234,56/);
+    expect(pdfLinesToText(["Credit", "Total 1 234,56"])).not.toMatch(/Total[^\n]*-/);
+  });
+});

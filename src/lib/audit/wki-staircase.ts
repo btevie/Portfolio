@@ -48,7 +48,9 @@ export function wkiStaircaseFindings(inv: Invoice, ctx: AuditContext): AuditFind
   const m = (v: string) => formatMoney(v, "EUR");
 
   const chargedFee = feeLines.reduce((acc, l) => acc.plus(D(l.total)), D(0));
-  const principal = Decimal.max(D(0), D(inv.subtotal).minus(chargedFee));
+  // The invoice total (VAT included) less the fee. The statutory base can be the amount with or without VAT depending on whether the creditor can reclaim it;
+  // the larger base gives the larger allowance, so a vendor is never accused on a base that may be too low.
+  const principal = Decimal.max(D(0), D(inv.total).minus(chargedFee));
   const maxAllowed = statutoryBikMaxEur(principal);
 
   // 1. Check whether charged collection costs exceed the exact Dutch statutory BIK staffel
@@ -72,7 +74,7 @@ export function wkiStaircaseFindings(inv: Invoice, ctx: AuditContext): AuditFind
         ],
         confidence: "high",
         confidenceReason: "Exact arithmetic calculation against the statutory Dutch BIK sliding scale.",
-        uncertainty: "Verify whether the fee covers multiple combined overdue invoices not listed on this single document.",
+        uncertainty: "Verify whether the fee covers multiple combined overdue invoices not listed on this single document. The cap is worked out on the invoice total including VAT; if the principal on the original notice is lower, the real cap is lower too.",
         recommendedAction: "Dispute any amount above the statutory BIK cap—and note that collection fees also require a prior 14-day formal notice (14-dagenbrief) and cannot include 21% VAT if the creditor is VAT-registered.",
         amountAtRisk: str2(excess),
       })

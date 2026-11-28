@@ -145,7 +145,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
           <Celebration />
           <nav aria-label="Main" className="fixed inset-x-4 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-40 flex items-center justify-between rounded-full bg-card/95 p-1.5 shadow-[0_12px_32px_-8px_rgb(0_0_0/0.35)] ring-1 ring-border backdrop-blur lg:hidden">
-            {[NAV[0], NAV[1], { href: "/invoices/new", label: "Check", icon: Upload }, NAV[2], NAV[3]].map((n) => {
+            {[NAV[0], NAV[1], { href: "/invoices/new", label: "Check", icon: Upload }, NAV[4], NAV[3]].map((n) => {
               const active = n.href === "/invoices/new" ? path === n.href : n.href === "/invoices" ? path.startsWith("/invoices") && path !== "/invoices/new" : path.startsWith(n.href);
               return (
                 <Link key={n.href} href={n.href} onClick={() => haptic(6)} aria-current={active ? "page" : undefined} className={cn("relative flex h-14 flex-1 flex-col items-center justify-center gap-0.5 rounded-full transition-colors", active ? "text-white" : "text-muted-foreground active:bg-muted")}>

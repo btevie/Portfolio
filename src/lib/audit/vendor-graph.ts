@@ -13,10 +13,12 @@ function tokenSet(inv: Invoice): Set<string> {
   );
 }
 
+/** Share of the smaller description set found in the other. Fewer than two shared words is a coincidence ("Service", "Item"), not a match. */
 function overlapScore(a: Set<string>, b: Set<string>): number {
   if (a.size === 0 || b.size === 0) return 0;
   let hit = 0;
   for (const t of a) if (b.has(t)) hit++;
+  if (hit < 2) return 0;
   return hit / Math.min(a.size, b.size);
 }
 

@@ -27,9 +27,11 @@ export async function encryptBackup(json: string, passphrase: string): Promise<s
 export async function decryptBackup(file: string, passphrase: string): Promise<string> {
   let parsed: { format?: string; iterations?: number; salt?: string; iv?: string; data?: string };
   try { parsed = JSON.parse(file); } catch { throw new Error("This isn't an Overbill encrypted backup."); }
-  if (parsed.format !== MAGIC || !parsed.salt || !parsed.iv || !parsed.data || !Number.isInteger(parsed.iterations) || parsed.iterations! < 100_000 || parsed.iterations! > 5_000_000) throw new Error("This isn't an Overbill encrypted backup.");
+  if (parsed.format !== MAGIC || !parsed.salt || !parsed.iv || !parsed.data) throw new Error("This isn't an Overbill encrypted backup.");
+  // As in earlier versions: a missing or out-of-range count means the default, and a huge count in a hostile file is never honoured.
+  const iterations = Number.isInteger(parsed.iterations) && parsed.iterations! >= 100_000 && parsed.iterations! <= 5_000_000 ? parsed.iterations! : ITERATIONS;
   try {
-    const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(parsed.iv) as BufferSource }, await key(passphrase, unb64(parsed.salt), parsed.iterations!), unb64(parsed.data) as BufferSource);
+    const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(parsed.iv) as BufferSource }, await key(passphrase, unb64(parsed.salt), iterations), unb64(parsed.data) as BufferSource);
     return new TextDecoder().decode(plain);
   } catch {
     throw new Error("Wrong passphrase, or the file has been changed.");

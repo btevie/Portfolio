@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { createSeedState } from "../data/seed";
+import type { Invoice } from "../types";
+import type { BankTx } from "./match";
+import { D } from "../audit/money";
 import { applyCorrections, findDuplicatePayments, parseStatement, toAmount } from "./match";
 
 describe("toAmount", () => {
@@ -102,5 +105,84 @@ describe("match evidence and corrections", () => {
     expect(applyCorrections(dups, { ...none, dismissed: new Set([dups[0].id]) }).shown).toHaveLength(0);
     expect(applyCorrections(dups, { ...none, removed: new Set([dups[0].txs[0].line]) }).shown).toHaveLength(0);
     expect(applyCorrections(dups, none).shown[0].refundable.toFixed(2)).toBe(Number(inv.total).toFixed(2));
+  });
+});
+
+describe("payment matching review fixes", () => {
+  const inv = (id: string, vendor: string, number: string): Invoice => ({
+    id, vendorId: id, vendorName: vendor, number, date: "2026-11-01", dueDate: "2026-11-15", currency: "EUR", subtotal: "40.00", total: "40.00", taxAmount: "0.00", taxRate: "0", discounts: "0.00", fees: "0.00",
+    lineItems: [], paymentStatus: "paid", source: "upload", createdAt: 1, notes: "",
+  } as unknown as Invoice);
+  const tx = (line: number, date: string, description: string): BankTx => ({ date, description, amount: "40.00", line });
+
+  it("two invoices of the same amount explain two nearby vendor-only payments", () => {
+    const out = findDuplicatePayments([tx(2, "2026-11-03", "ACME PAYMENT"), tx(3, "2026-11-05", "ACME PAYMENT")], [inv("a", "Acme", "A-1"), inv("b", "Acme", "A-2")]);
+    expect(out).toHaveLength(0);
+  });
+
+  it("does not pair a payment with the wrong vendor's identical invoice number", () => {
+    const out = findDuplicatePayments([tx(2, "2026-11-03", "Acme INV-001"), tx(3, "2026-11-04", "Beta INV-001")], [inv("a", "Acme", "INV-001"), inv("b", "Beta", "INV-001")]);
+    expect(out.filter((d) => d.strength === "strong")).toHaveLength(0);
+  });
+
+  it("counts a numbered payment together with a vendor-only payment for one invoice", () => {
+    const out = findDuplicatePayments([tx(2, "2026-11-03", "Acme INV-001"), tx(3, "2026-11-04", "ACME PAYMENT")], [inv("a", "Acme", "INV-001")]);
+    expect(out).toHaveLength(1);
+    expect(out[0].refundable.toFixed(2)).toBe("40.00");
+  });
+
+  it("reads Debit Amount / Credit Amount as split columns", () => {
+    const r = parseStatement("Date,Description,Debit Amount,Credit Amount\n2026-11-03,ACME,40.00,\n2026-11-04,REFUND,,5.00\n", {});
+    expect(r.ambiguous).toBeFalsy();
+    expect(r.txs).toHaveLength(1);
+    expect(r.incoming).toHaveLength(1);
+  });
+});
+
+
+describe("vendor-only payments next to a double-paid numbered invoice", () => {
+  const inv = (id: string, number: string): Invoice => ({
+    id, vendorId: "v1", vendorName: "Acme", number, date: "2026-11-01", dueDate: "2026-11-15", currency: "EUR", lineItems: [], subtotal: "40.00", discounts: "0.00", fees: "0.00",
+    taxAmount: "0.00", total: "40.00", paymentStatus: "paid", source: "upload", extraction: "csv", createdAt: 1,
+  });
+  const tx = (line: number, date: string, description: string) => ({ date, description, amount: "40.00", line });
+  it("does not let an invoice that a strong match already used explain the vendor-only payments too", () => {
+    const found = findDuplicatePayments(
+      [tx(2, "2026-11-02", "Acme INV-2026-001"), tx(3, "2026-11-03", "Acme INV-2026-001"), tx(4, "2026-11-04", "ACME PAYMENT"), tx(5, "2026-11-05", "ACME PAYMENT")],
+      [inv("a", "INV-2026-001"), inv("b", "INV-2026-002")],
+    );
+    const total = found.reduce((a, d) => a.plus(d.refundable), D(0));
+    expect(total.toFixed(2)).toBe("80.00");
+  });
+  it("says so when a quoted-number payment is part of a vendor-only group", () => {
+    const found = findDuplicatePayments([tx(2, "2026-11-02", "Acme INV-2026-001"), tx(3, "2026-11-03", "ACME PAYMENT")], [inv("a", "INV-2026-001")]);
+    expect(found).toHaveLength(1);
+    expect(found[0].reasons.join(" ")).toMatch(/quotes? an invoice number/);
+  });
+});
+
+describe("findDuplicatePayments capacity", () => {
+  const invoices = createSeedState().invoices;
+  const inv = invoices.find((i) => i.vendorName.startsWith("Northwind"))!;
+  it("counts two numbered payments and one vendor-only payment against one invoice as two extra payments in total", () => {
+    const stmt = `Date,Description,Amount\n2026-11-03,${inv.vendorName} ${inv.number},-${inv.total}\n2026-11-10,${inv.vendorName} ${inv.number},-${inv.total}\n2026-11-17,${inv.vendorName},-${inv.total}\n`;
+    const dups = findDuplicatePayments(parseStatement(stmt).txs, [inv]); // exactly one invoice on file
+    const refundable = dups.reduce((t, d) => t.plus(d.refundable), D(0));
+    expect(refundable.toFixed(2)).toBe(D(inv.total).times(2).toFixed(2));
+    const lines = dups.flatMap((d) => d.txs.map((t) => t.line));
+    expect(new Set(lines).size).toBe(lines.length); // each payment is reported once
+  });
+});
+
+
+describe("suggestion ids", () => {
+  it("differ for two vendors whose payments share dates, amounts and rows", () => {
+    const mk = (id: string, vendor: string): Invoice => ({ id, vendorId: id, vendorName: vendor, number: `${vendor}-2026-100`, date: "2026-11-01", dueDate: "2026-11-15", currency: "EUR", lineItems: [], subtotal: "40.00", discounts: "0.00", fees: "0.00", taxAmount: "0.00", total: "40.00", paymentStatus: "paid", source: "upload", extraction: "csv", createdAt: 1 });
+    const pay = (vendor: string): BankTx[] => [2, 3].map((line) => ({ date: `2026-11-0${line}`, description: `${vendor} ${vendor}-2026-100`, amount: "40.00", line }));
+    const a = findDuplicatePayments(pay("Acme"), [mk("a", "Acme")]);
+    const b = findDuplicatePayments(pay("Beta"), [mk("b", "Beta")]);
+    expect(a).toHaveLength(1);
+    expect(b).toHaveLength(1);
+    expect(a[0].id).not.toBe(b[0].id);
   });
 });

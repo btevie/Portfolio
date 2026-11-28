@@ -43,7 +43,9 @@ export type EventInput =
   | { kind: "reply"; date: ISODate; text: string; followUpDate?: ISODate }
   | { kind: "promise"; date?: ISODate; amount: string; text?: string; reference?: string }
   | { kind: "applied" | "received"; date: ISODate; amount: string; text?: string; reference?: string }
-  | { kind: "note"; text: string };
+  | { kind: "note"; text: string }
+  /** Fixes a mistaken "applied" or "received" total. `amount` is the corrected TOTAL for that field (zero is allowed), and a reason is required. The earlier entry stays in the timeline. */
+  | { kind: "correct"; field: "applied" | "received"; amount: string; text: string };
 
 export function validateEvent(r: RecoveryRecord, e: EventInput, asOf: ISODate): string | null {
   const dateOk = (d: string | undefined) => d !== undefined && parseISO(d) !== null;
@@ -55,6 +57,15 @@ export function validateEvent(r: RecoveryRecord, e: EventInput, asOf: ISODate): 
   if ("text" in e && (e.text ?? "").length > 1000) return "Keep the note under 1,000 characters.";
   if ("reference" in e && (e.reference ?? "").length > 120) return "Keep the reference under 120 characters.";
   if (e.kind === "note") return e.text.trim() ? null : "Write a note first.";
+  if (e.kind === "correct") {
+    if (!isValidDecimal(e.amount) || e.amount.trim().startsWith("-")) return "Enter the correct total (zero or more).";
+    if (!e.text.trim()) return "Say what was wrong, so the timeline explains the change.";
+    const f = caseFigures(r);
+    const other = e.field === "applied" ? f.received : f.applied;
+    const cap = f.promised ?? f.claimed;
+    if (other.plus(D(e.amount)).gt(cap)) return `That would be more than the ${f.promised ? "promised" : "claimed"} ${cap.toFixed(2)}. Record the promised amount first if the vendor agreed to more.`;
+    return null;
+  }
   if (e.kind === "contacted" || e.kind === "reply") {
     if (!dateOk(e.date)) return "Enter a valid date.";
     if (e.date > asOf) return "That date is in the future. Record it once it has happened.";
@@ -87,7 +98,22 @@ export function applyEvent(r: RecoveryRecord, e: EventInput, asOf: ISODate): Rec
   const early = r.status === "flagged" || r.status === "disputed";
 
   if (e.kind === "note") events.push(ev("note", e.text.trim()));
-  else if (e.kind === "contacted") {
+  else if (e.kind === "correct") {
+    const was = e.field === "applied" ? startingFigures.applied : startingFigures.received;
+    const amount = D(e.amount);
+    const field = e.field === "applied" ? "appliedAmount" : "recoveredAmount";
+    events.push(ev("correction", `Corrected ${e.field === "applied" ? "credit applied" : "refund received"} from ${was.toFixed(2)} to ${amount.toFixed(2)}. ${e.text.trim()}`, { amount: amount.toFixed(2) }));
+    // A case marked recovered before amounts were tracked has both totals implied; make the other one explicit so only this one changes.
+    next = { ...next, ...(startingFigures.legacy ? { appliedAmount: startingFigures.applied.toFixed(2), recoveredAmount: startingFigures.received.toFixed(2) } : {}), [field]: amount.toFixed(2) };
+    const after = caseFigures({ ...next, status: "credit_issued" });
+    if (after.outstanding.lte(0) && after.resolved.gte(after.claimed)) { move("recovered"); next.followUpDate = undefined; next.nextStep = undefined; }
+    else if (after.outstanding.lte(0)) {
+      // Everything promised has arrived but part of the claim is still unresolved: keep the case open for the rest.
+      if (r.status !== "vendor_responded") move("vendor_responded");
+      next.followUpDate = undefined; next.nextStep = "Ask the vendor about the remaining claim";
+    }
+    else if (r.status === "recovered") { move(after.promised ? "credit_issued" : "vendor_responded"); next.nextStep = after.promised ? "Waiting for the rest" : "Confirm what remains outstanding with the vendor"; }
+  } else if (e.kind === "contacted") {
     events.push(ev("disputed", e.text.trim() || "Contacted the vendor", { date: e.date }));
     if (r.status === "flagged") move("disputed");
     next.followUpDate = e.followUpDate || addDays(e.date, 7);
@@ -116,7 +142,7 @@ export function applyEvent(r: RecoveryRecord, e: EventInput, asOf: ISODate): Rec
     const base = caseFigures(r);
     const amount = D(e.amount);
     events.push(ev(e.kind, e.text?.trim() || (e.kind === "applied" ? "Credit applied to my account" : "Money received"), { amount: amount.toFixed(2), reference: e.reference?.trim() || undefined, date: e.date }));
-    const prior = e.kind === "applied" ? base.applied : (base.legacy ? D(0) : base.received);
+    const prior = e.kind === "applied" ? base.applied : base.received;
     next = { ...next, [field]: prior.plus(amount).toFixed(2) };
     const after = caseFigures({ ...next, status: "credit_issued" });
     if (after.outstanding.lte(0) && after.resolved.gte(after.claimed)) { move("recovered"); next.followUpDate = undefined; next.nextStep = undefined; }

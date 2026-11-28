@@ -16,12 +16,14 @@ export interface NegotiationPlaybook {
 }
 
 export function buildNegotiationPlaybook(vendor: Vendor, invoices: Invoice[], todayIso: string): NegotiationPlaybook | null {
-  const valid = invoices
+  const all = invoices
     .filter((i) => i.vendorId === vendor.id && !i.isCredit && i.extraction !== "mock")
     .sort((a, b) => (parseISO(a.date) ?? 0) - (parseISO(b.date) ?? 0));
-  if (valid.length === 0) return null;
+  if (all.length === 0) return null;
 
-  const currency = valid[valid.length - 1].currency;
+  // Overbill never converts currencies, so every figure here uses only the invoices in the vendor's latest currency.
+  const currency = all[all.length - 1].currency;
+  const valid = all.filter((i) => i.currency === currency);
   const totalSpend = valid.reduce((acc, i) => acc.plus(D(i.total)), D(0));
   const firstMs = parseISO(valid[0].date);
   const lastMs = parseISO(valid[valid.length - 1].date);

@@ -23,12 +23,13 @@ export function LineChart({ points, average, currency, ariaLabel }: { points: Po
   // Measure the container so the viewBox matches the rendered width: labels stay 12px on every screen.
   const box = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(480);
+  const hasPoints = points.length > 0; // the wrapper only exists once there are points, so observing has to start then
   useEffect(() => {
     const el = box.current; if (!el) return;
     const ro = new ResizeObserver(([e]) => setWidth(Math.round(e.contentRect.width)));
     ro.observe(el); setWidth(Math.round(el.clientWidth) || 480);
     return () => ro.disconnect();
-  }, []);
+  }, [hasPoints]);
   const W = Math.max(260, width), H = width < 420 ? 190 : 210, L = width < 420 ? 48 : 56, R = 14, T = 16, B = 30;
   if (points.length === 0) return null;
   const vals = points.map((p) => p.value).concat(average ? [average] : []);

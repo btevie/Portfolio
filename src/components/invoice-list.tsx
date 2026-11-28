@@ -91,12 +91,13 @@ export function InvoiceList() {
   const [seenUrlQ, setSeenUrlQ] = useState(urlQ);
   if (seenUrlQ !== urlQ) { setSeenUrlQ(urlQ); setQState(urlQ); } // the top-bar search pushes ?q= while this page is already mounted
   const status = sp.get("status") ?? "all";
-  const vendorFilter = sp.get("vendor") ?? "";
+  const requestedVendor = sp.get("vendor") ?? "";
   const payFilter = sp.get("pay") ?? "";
+  const vendorFilter = state.vendors.some((v) => v.id === requestedVendor) ? requestedVendor : ""; // one value for the control and the filter, so a stale link cannot filter invisibly
   const requestedSort = sp.get("sort") ?? "date_desc";
-  const sort = requestedSort in SORTS ? (requestedSort as keyof typeof SORTS) : "date_desc";
+  const sort = Object.prototype.hasOwnProperty.call(SORTS, requestedSort) ? (requestedSort as keyof typeof SORTS) : "date_desc";
   const pageSize = 8;
-  const requestedPage = Math.max(1, Number(sp.get("page") ?? 1) || 1);
+  const requestedPage = Math.max(1, Math.floor(Number(sp.get("page") ?? 1)) || 1); // a fractional page would slice from the middle of a page
 
   // Update the current URL so search, filters, and sorting remain shareable.
   const set = (key: string, value: string) => {
@@ -143,7 +144,7 @@ export function InvoiceList() {
       .filter(({ classification, searchText, invoice }) =>
         (!vendorFilter || invoice.vendorId === vendorFilter) &&
         (!needle || searchText.includes(needle)) &&
-        (!payFilter || (!invoice.isCredit && !isSimulated(invoice) && paymentStatusAt(invoice) === payFilter)) &&
+        (!payFilter || status === "credits" || (!invoice.isCredit && !isSimulated(invoice) && paymentStatusAt(invoice) === payFilter)) &&
         (status === "all" || (status === "credits" ? Boolean(invoice.isCredit) : !invoice.isCredit && !isSimulated(invoice) && (status === "attention" ? classification !== "CLEAR" : status === "clear" ? classification === "CLEAR" : classification === status.toUpperCase()))),
       )
       .sort((a, b) =>
@@ -248,12 +249,12 @@ export function InvoiceList() {
 
             <div className="mt-2 grid grid-cols-2 gap-2">
               <label className="min-w-0"><span className="sr-only">Filter by vendor</span>
-                <select value={state.vendors.some((v) => v.id === vendorFilter) ? vendorFilter : ""} onChange={(e) => set("vendor", e.target.value)} className="h-10 w-full min-w-0 cursor-pointer rounded-full bg-muted px-3.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <select value={vendorFilter} onChange={(e) => set("vendor", e.target.value)} className="h-10 w-full min-w-0 cursor-pointer rounded-full bg-muted px-3.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
                   <option value="">All vendors</option>
                   {[...state.vendors].sort((a, b) => a.name.localeCompare(b.name)).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
                 </select></label>
-              <label className="min-w-0"><span className="sr-only">Filter by payment status</span>
-                <select value={payFilter} onChange={(e) => set("pay", e.target.value)} className="h-10 w-full min-w-0 cursor-pointer rounded-full bg-muted px-3.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <label className="min-w-0"><span className="sr-only">Filter by payment status{status === "credits" ? " (not available for credit notes, which are not payable)" : ""}</span>
+                <select value={payFilter} disabled={status === "credits"} title={status === "credits" ? "Credit notes are not payable, so payment status does not apply" : undefined} onChange={(e) => set("pay", e.target.value)} className="h-10 disabled:cursor-not-allowed disabled:opacity-50 w-full min-w-0 cursor-pointer rounded-full bg-muted px-3.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
                   <option value="">Any payment status</option><option value="unpaid">Unpaid</option><option value="overdue">Past due</option><option value="paid">Paid (set by you)</option>
                 </select></label>
             </div>

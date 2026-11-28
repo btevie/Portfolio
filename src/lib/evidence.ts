@@ -6,7 +6,7 @@ import { RULE_META } from "./audit/engine";
  * checked, which figures were compared, where each figure came from, and what to confirm on the original bill.
  */
 
-export type ExtractionKind = "simulated" | "csv" | "text" | "pdf" | "sample" | "unknown";
+export type ExtractionKind = "simulated" | "csv" | "text" | "pdf" | "ocr" | "sample" | "unknown";
 
 export interface ExtractionInfo {
   kind: ExtractionKind;
@@ -35,6 +35,9 @@ export function extractionInfo(inv: Pick<Invoice, "extraction" | "source">): Ext
     case "pdf":
       return { kind: "pdf", short: "from the PDF's text", label: "Read from the PDF's embedded text",
         detail: "Overbill took the text stored inside the PDF. It did not look at the page image and used no optical character recognition. Columns can be scrambled in the stored text, so check line items against the printed bill.", fromYourDocument: true };
+    case "ocr":
+      return { kind: "ocr", short: "read from a scan", label: "Read from a scan or photo with text recognition",
+        detail: "Overbill read the page image with optical character recognition. A digit or letter can be misread, so every figure needs to be checked against the printed bill.", fromYourDocument: true };
     default:
       return inv.source === "demo"
         ? { kind: "sample", short: "sample data", label: "Fictional sample data",
@@ -171,6 +174,6 @@ export function findingGuide(f: AuditFinding, inv: Invoice): FindingGuide {
   ];
   const verify = info.kind === "simulated"
     ? ["Do not use this result. Upload a CSV, paste the invoice text, or use a PDF that has selectable text to run a real check."]
-    : [...(info.kind === "pdf" || info.kind === "text" ? ["Confirm that the figures in “Invoice says” match what is printed on your bill."] : []), ...k.verify];
+    : [...(info.kind === "pdf" || info.kind === "ocr" || info.kind === "text" ? ["Confirm that the figures in “Invoice says” match what is printed on your bill."] : []), ...k.verify];
   return { checked: k.checked, ruleName: meta?.name ?? f.ruleId, compared, verify, readingNotes };
 }

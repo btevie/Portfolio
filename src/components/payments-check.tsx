@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, CircleCheck, Landmark, TriangleAlert } from "lucide-react";
 import { formatMoney } from "@/lib/audit/money";
 import { actions, useAppState } from "@/lib/data/store";
@@ -18,13 +18,19 @@ const MAX_BYTES = 5 * 1024 * 1024;
 const TONE = { strong: "bad", medium: "warn", weak: "neutral" } as const;
 
 /** Finds money possibly paid twice by comparing a bank or card statement CSV with the invoices you have checked. Runs on this device. */
+// Dismissals are remembered in this browser (only the suggestion ids, which are dates, amounts and line numbers), so the same suggestion does not come back after a reload or a re-upload.
+const DISMISS_KEY = "overbill:dismissed-duplicates";
+function loadDismissed(): Set<string> { try { const v = JSON.parse(localStorage.getItem(DISMISS_KEY) ?? "[]"); return new Set(Array.isArray(v) ? v.filter((x): x is string => typeof x === "string").slice(-500) : []); } catch { return new Set(); } }
+function saveDismissed(s: Set<string>) { try { localStorage.setItem(DISMISS_KEY, JSON.stringify([...s].slice(-500))); } catch { /* storage unavailable: dismissals last for this visit only */ } }
+
 export function PaymentsCheck() {
   const state = useAppState();
   const [file, setFile] = useState<{ name: string; text: string } | null>(null);
   const [convention, setConvention] = useState<SignConvention | undefined>();
   const [error, setError] = useState("");
   const [tracked, setTracked] = useState<Set<string>>(new Set());
-  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const [dismissed, setDismissed] = useState<Set<string>>(loadDismissed);
+  useEffect(() => saveDismissed(dismissed), [dismissed]);
   const [removed, setRemoved] = useState<Set<number>>(new Set());
   const [relinked, setRelinked] = useState<Map<string, string>>(new Map());
 
@@ -32,13 +38,16 @@ export function PaymentsCheck() {
   const dups = useMemo(() => (parsed && !parsed.error && !parsed.ambiguous ? findDuplicatePayments(parsed.txs, state.invoices) : []), [parsed, state.invoices]);
   const { shown, dismissed: hidden } = useMemo(() => applyCorrections(dups, { dismissed, removed, relinked }), [dups, dismissed, removed, relinked]);
 
+  const upload = useRef(0); // the newest selection wins: a slow read of an earlier file must not replace it
   async function onFiles(files: File[]) {
     const f = files[0];
-    setError(""); setFile(null); setConvention(undefined); setTracked(new Set()); setDismissed(new Set()); setRemoved(new Set()); setRelinked(new Map());
+    const mine = ++upload.current;
+    setError(""); setFile(null); setConvention(undefined); setTracked(new Set()); setRemoved(new Set()); setRelinked(new Map());
     if (!f) return;
     if (!/\.(csv|txt)$/i.test(f.name)) return setError("Please choose a .csv file exported from your bank or card provider.");
     if (f.size > MAX_BYTES) return setError("That file is larger than 5 MB. Export a shorter date range.");
-    setFile({ name: f.name, text: await f.text() });
+    const text = await f.text();
+    if (mine === upload.current) setFile({ name: f.name, text });
   }
 
   const set = <T,>(setter: (fn: (p: T) => T) => void, fn: (p: T) => T) => setter(fn);
@@ -47,9 +56,14 @@ export function PaymentsCheck() {
   function track(d: DuplicatePayment) {
     const inv = d.invoice;
     if (!inv) return;
+    const title = `Possible double payment: ${inv.number}`;
+    // Re-uploading the same statement must not open a second case for the same claim.
+    // The key is the suggestion's own id (its dates, amounts and statement lines), so two different double payments on one invoice are two cases, and the same one is never two.
+    const key = `bank:${d.id}`;
+    if (state.recovery.some((r) => r.findingId === key || (r.invoiceId === inv.id && r.title === title && !r.findingId))) { setTracked((t) => new Set(t).add(d.id)); return; }
     actions.addRecovery({
-      vendorId: inv.vendorId, vendorName: inv.vendorName, invoiceId: inv.id, currency: inv.currency, amount: d.refundable.toFixed(2),
-      title: `Possible double payment: ${inv.number}`, notes: `${d.reasons.join(" ")} Suggested by comparing a bank statement in Overbill and checked by me. Not yet confirmed with the vendor.`,
+      vendorId: inv.vendorId, vendorName: inv.vendorName, invoiceId: inv.id, findingId: key, currency: inv.currency, amount: d.refundable.toFixed(2),
+      title, notes: `${d.reasons.join(" ")} Suggested by comparing a bank statement in Overbill and checked by me. Not yet confirmed with the vendor.`,
     });
     setTracked((t) => new Set(t).add(d.id));
   }
@@ -156,7 +170,7 @@ export function PaymentsCheck() {
               <ul className="mt-2 divide-y divide-line text-sm">{parsed.incoming.slice(0, 50).map((t) => <li key={t.line} className={cn("flex justify-between gap-3 py-1.5")}><span className="min-w-0 break-words">{fmtDate(t.date)} · {t.description}</span><span className="num shrink-0">{t.amount}</span></li>)}</ul>
             </details>
           )}
-          <p className="text-xs text-muted-foreground">These are possible double payments, not confirmed ones. Partial payments, deposits and instalments can look alike. Overbill never contacts your bank or vendor, and corrections here last only until you leave this page.</p>
+          <p className="text-xs text-muted-foreground">These are possible double payments, not confirmed ones. Partial payments, deposits and instalments can look alike. Overbill never contacts your bank or vendor, Dismissals are remembered in this browser until you choose &quot;Undo all&quot;. Removed payments and changed invoice links last only until you leave this page.</p>
         </section>
       )}
       {!file && !error && <p className="mt-4 flex items-center gap-2 text-sm text-muted-foreground"><Landmark className="size-4" aria-hidden />Tip: export the last 3 months from your online banking.</p>}

@@ -46,9 +46,12 @@ export function DisputeKitEditor({ inv, findings, onDone }: { inv: Invoice; find
       await navigator.clipboard.writeText(value);
       setCopied(ok);
     } catch {
-      const ta = document.getElementById("note-text") as HTMLTextAreaElement | null; // fall back to manual copy
-      ta?.select();
+      // Fall back to a throwaway textarea holding exactly the requested value (the visible note may hold something else).
+      const ta = document.createElement("textarea");
+      ta.value = value; ta.setAttribute("readonly", ""); ta.style.cssText = "position:fixed;opacity:0;pointer-events:none";
+      document.body.appendChild(ta); ta.select();
       try { setCopied(document.execCommand("copy") ? ok : "fail"); } catch { setCopied("fail"); }
+      ta.remove();
     }
   }
 

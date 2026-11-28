@@ -51,7 +51,7 @@ export function InvoiceDetail({ id }: { id: string }) {
         title={<>{inv.vendorName}<span className="sr-only"> · </span><span className="mt-0.5 block text-base font-normal text-muted-foreground sm:ml-2 sm:inline sm:text-2xl">{inv.number}</span></>}
         description={inv.isCredit ? "Credit note · money owed to you · not a bill to pay" : cls === "CLEAR" ? (audit.findings.length ? "All findings are resolved or dismissed." : "Everything looks consistent with the checks we ran. That is not a guarantee.") : "Start with the box below, then open each finding to see why it was flagged. These are possible problems, not confirmed errors, until you confirm them."}
         actions={<>
-          <span className="max-sm:hidden">{inv.isCredit ? <Pill tone="info">Credit note</Pill> : <ClassBadge value={cls} />}</span>
+          <span className="max-sm:hidden">{inv.isCredit ? <Pill tone="info">Credit note</Pill> : isSimulated(inv) ? <Pill tone="bad">Simulated, not your bill</Pill> : <ClassBadge value={cls} />}</span>
           <Button variant="secondary" className="text-bad" onClick={() => setConfirmDelete(true)} aria-label="Delete invoice"><Trash2 className="size-4" aria-hidden /></Button>
         </>}
       />
@@ -223,13 +223,13 @@ function FindingCard({ f, inv, onNote, first, simulated }: { f: AuditFinding; in
   const decision = state.decisions[f.id] ?? "open";
   const [undo, setUndo] = useState<{ from: FindingDecision; label: string } | null>(null);
   const [asking, setAsking] = useState(false);
+  const [copied, setCopied] = useState<"ok" | "fail" | null>(null);
   const [reason, setReason] = useState("");
   const decide = (to: FindingDecision, label: string, why?: string) => { setUndo({ from: decision, label }); actions.setDecision(f.id, to, why); setAsking(false); setReason(""); };
   const savedReason = state.decisionReasons?.[f.id];
   const record = state.recovery.find((r) => r.findingId === f.id);
   const dismissed = !isOpen(state, f);
   const panel = `finding-${f.id.replace(/[^a-z0-9]/gi, "-")}`;
-  const row = (k: string, v: string) => <div><dt className="eyebrow">{k}</dt><dd className={cn("num mt-1 text-sm font-semibold", k === "Difference" && "text-warn")}>{v}</dd></div>;
 
   return (
     <Card className={cn("overflow-hidden rounded-[28px]", dismissed && "opacity-70")}>
@@ -239,7 +239,7 @@ function FindingCard({ f, inv, onNote, first, simulated }: { f: AuditFinding; in
           {decision === "confirmed" ? <Pill tone="bad">Confirmed error</Pill> : decision === "dismissed" ? <Pill>Dismissed</Pill> : null}
         </div>
         <div className="flex items-start justify-between gap-3"><div><h3 className="display text-base font-semibold text-ink">{f.title}</h3><p className="mt-1 text-xs text-muted-foreground">Difference: <span className="font-semibold text-warn">{f.difference}</span></p></div><span className="num shrink-0 text-sm font-semibold text-ink">{D(f.amountAtRisk).gt(0) ? formatMoney(f.amountAtRisk, inv.currency) : ""}</span></div>
-        {expanded && <div className="mt-3 space-y-3"><p className="text-sm text-muted-foreground">{f.explanation}</p><dl className="grid grid-cols-1 divide-y divide-line rounded-md border border-line bg-raised sm:grid-cols-3 sm:divide-x sm:divide-y-0 [&>div]:px-3 [&>div]:py-2">{row("Should be", f.expected)}{row("Invoice says", f.actual)}{row("Difference", f.difference)}</dl></div>}
+        {expanded && <div className="mt-3 space-y-3"><p className="text-sm text-muted-foreground">{f.explanation}</p></div>}
         <button type="button" aria-expanded={expanded} aria-controls={panel} onClick={() => setExpanded(!expanded)} className="mt-2 inline-flex min-h-8 cursor-pointer items-center gap-1 text-sm font-semibold text-primary hover:underline">
           {expanded ? "Hide details" : "View details"}<ChevronDown className={cn("size-4 transition-transform duration-150", expanded && "rotate-180")} aria-hidden />
         </button>
@@ -253,22 +253,23 @@ function FindingCard({ f, inv, onNote, first, simulated }: { f: AuditFinding; in
           <div>
             <h4 className="eyebrow">What to do next</h4>
             <p className="mt-1.5">{f.recommendedAction}</p>
-            <div className="mt-2.5 flex flex-wrap items-center gap-2">
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => {
-                  const kit = buildDisputeKit(inv, f, decision, "");
-                  const draft = `Subject: ${kit.subject}\n\n${kit.message}`;
-                  void navigator.clipboard?.writeText(draft);
-                  setUndo({ from: decision, label: "Dispute email copied to clipboard" });
-                }}
-              >
-                <MailPlus className="mr-1.5 size-3.5" aria-hidden />
-                Copy dispute email
-              </Button>
-            </div>
+            {!simulated && (
+              <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={async () => {
+                    const kit = buildDisputeKit(inv, f, decision, "");
+                    try { await navigator.clipboard.writeText(`Subject: ${kit.subject}\n\n${kit.message}`); setCopied("ok"); } catch { setCopied("fail"); }
+                  }}
+                >
+                  <MailPlus className="mr-1.5 size-3.5" aria-hidden />
+                  Copy dispute email
+                </Button>
+                <span role="status" className={cn("text-sm", copied === "fail" ? "text-bad" : "text-muted-foreground")}>{copied === "ok" ? "Dispute email copied. Nothing was sent." : copied === "fail" ? "Could not copy. Use Draft note and copy from there." : ""}</span>
+              </div>
+            )}
           </div>
           {D(f.amountAtRisk).gt(0) && <p className="num text-muted-foreground">Amount at stake (incl. tax): <strong className="text-ink">{formatMoney(f.amountAtRisk, inv.currency)}</strong></p>}
           <p role="status" className="min-h-5 text-sm text-muted-foreground">{undo && <>{undo.label}. <button type="button" className="min-h-11 cursor-pointer font-semibold text-primary hover:underline" onClick={() => { actions.setDecision(f.id, undo.from); setUndo(null); }}>Undo</button></>}</p>

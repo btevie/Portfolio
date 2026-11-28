@@ -40,7 +40,7 @@ export function PayRun() {
     const rows = unpaid.map((invoice) => {
       const a = audits[invoice.id];
       const open = a ? a.findings.filter((f) => isOpen(state, f)) : [];
-      return { invoice, open, exposure: invoiceExposure(open, invoice.total), cls: a ? effectiveClassification(state, a) : "CLEAR" as const };
+      return { invoice, open, exposure: invoiceExposure(open, invoice.total), cls: a ? effectiveClassification(state, a) : "REVIEW_NEEDED" as const }; // no audit yet: hold it, never treat an unchecked invoice as clear
     });
     return { ready: rows.filter((r) => r.cls === "CLEAR"), hold: rows.filter((r) => r.cls !== "CLEAR") };
   }, [state, audits]);
@@ -68,7 +68,7 @@ export function PayRun() {
   /** What to hold, and why, for whoever pays the bills. Amounts are possible, not confirmed. */
   function exportHold() {
     const head = ["vendor", "invoice_number", "due_date", "currency", "invoice_total", "possible_overcharge_not_confirmed", "why_held"];
-    const lines = hold.map(({ invoice: i, open, exposure }) => safeCsvRow([i.vendorName, i.number, i.dueDate, i.currency, i.total, exposure.toFixed(2), open.map((f) => f.title).join(" | ")]));
+    const lines = hold.map(({ invoice: i, open, exposure }) => safeCsvRow([i.vendorName, i.number, i.dueDate, i.currency, i.total, exposure.toFixed(2), open.length ? open.map((f) => f.title).join(" | ") : "Audit not available yet"]));
     const blob = new Blob([[safeCsvRow(head), ...lines].join("\n")], { type: "text/csv" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob); a.download = `overbill-hold-list-${today()}.csv`; a.click();

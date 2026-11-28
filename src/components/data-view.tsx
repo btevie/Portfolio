@@ -2,11 +2,11 @@
 import { markBackedUp } from "@/lib/backup";
 import { Download, FileSpreadsheet, Lock, RotateCcw, Trash2, Upload } from "lucide-react";
 import { useRef, useState } from "react";
-import { actions, useAppState } from "@/lib/data/store";
+import { actions, hasOwnData, useAppState } from "@/lib/data/store";
 import { parseStoredState } from "@/lib/data/validate-state";
 import { forgetLocalFlags } from "@/lib/get-started";
 import { Button, Modal } from "@/components/ui";
-import { decryptBackup, encryptBackup, isEncryptedBackup } from "@/lib/crypto-backup";
+import { decryptBackup, encryptBackup, isEncryptedBackup, MIN_PASSPHRASE } from "@/lib/crypto-backup";
 import { auditAll } from "@/lib/data/selectors";
 import { buildManifest, findingsCsv } from "@/lib/export-pack";
 
@@ -23,6 +23,7 @@ export function DataView() {
   const file = useRef<HTMLInputElement>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [confirm, setConfirm] = useState(false);
+  const [confirmSample, setConfirmSample] = useState(false);
   const [pending, setPending] = useState<{ raw: string; invoices: number; vendors: number; cases: number; dropped: number } | null>(null);
   const [passphrase, setPassphrase] = useState("");
   const [locked, setLocked] = useState<string | null>(null); // an encrypted file waiting for its passphrase
@@ -37,7 +38,7 @@ export function DataView() {
   }
 
   async function backupEncrypted() {
-    if (passphrase.length < 8) { setMsg({ ok: false, text: "Use a passphrase of at least 8 characters. Overbill cannot recover it if you forget it." }); return; }
+    if (passphrase.length < MIN_PASSPHRASE) { setMsg({ ok: false, text: `Use a passphrase of at least ${MIN_PASSPHRASE} characters. Overbill cannot recover it if you forget it.` }); return; }
     const enc = await encryptBackup(JSON.stringify({ ...s, exportedAt: new Date().toISOString() }), passphrase);
     download("overbill-backup.encrypted.json", enc, "application/json"); markBackedUp(); setPassphrase("");
     setMsg({ ok: true, text: "Encrypted backup downloaded. Keep the passphrase safe: without it the file cannot be opened." });
@@ -50,9 +51,15 @@ export function DataView() {
     setMsg({ ok: true, text: rows ? `Exported ${rows} finding${rows === 1 ? "" : "s"} and a manifest with a file hash.` : "No findings to export yet. The files hold only the header and manifest." });
   }
 
+  const selection = useRef(0); // each file choice gets a number; a read that finishes after a newer choice is ignored
+  const unlockRun = useRef(0); // bumped on cancel so a decryption that finishes afterwards is ignored
+  function cancelUnlock() { unlockRun.current++; setLocked(null); setUnlockWith(""); }
+
   async function unlock() {
     if (!locked) return;
+    const run = ++unlockRun.current;
     const plain = await decryptBackup(locked, unlockWith);
+    if (run !== unlockRun.current) return;
     if (plain === null) { setMsg({ ok: false, text: "Wrong passphrase, or the file was changed. Nothing was changed." }); return; }
     setLocked(null); setUnlockWith(""); stage(plain);
   }
@@ -64,9 +71,11 @@ export function DataView() {
   }
 
   async function restore(f: File | undefined) {
+    const mine = ++selection.current; // invalidates earlier selections, even if this one turns out to be invalid
     if (!f) return;
     if (f.size > MAX_BYTES) { setMsg({ ok: false, text: "That file is too large to be an Overbill backup." }); return; }
     const raw = await f.text();
+    if (mine !== selection.current) return;
     if (isEncryptedBackup(raw)) { setLocked(raw); setMsg(null); if (file.current) file.current.value = ""; return; }
     const parsed = parseStoredState(raw);
     if (!parsed) setMsg({ ok: false, text: "That file is not an Overbill backup. Nothing was changed." });
@@ -77,10 +86,10 @@ export function DataView() {
   const rows = [
     { icon: Download, title: "Download a backup", text: "One file with your invoices, vendors, recovery cases and settings.", action: <Button variant="primary" onClick={backup}>Download backup</Button> },
     { icon: Lock, title: "Download an encrypted backup", text: "Locked with a passphrase you choose, in your browser. Overbill cannot recover a forgotten passphrase.", action: (
-      <div className="flex w-full flex-col gap-2 sm:w-64"><label htmlFor="bk-pass" className="sr-only">Passphrase for the encrypted backup</label><input id="bk-pass" type="password" autoComplete="new-password" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} placeholder="Passphrase (8+ characters)" className="h-11 rounded-xl border bg-card px-3 text-sm" /><Button onClick={backupEncrypted}>Download encrypted backup</Button></div>) },
+      <div className="flex w-full flex-col gap-2 sm:w-64"><label htmlFor="bk-pass" className="sr-only">Passphrase for the encrypted backup</label><input id="bk-pass" type="password" autoComplete="new-password" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} placeholder={`Passphrase (${MIN_PASSPHRASE}+ characters)`} className="h-11 rounded-xl border bg-card px-3 text-sm" /><Button onClick={backupEncrypted}>Download encrypted backup</Button></div>) },
     { icon: FileSpreadsheet, title: "Export findings for your accountant", text: "A CSV of every finding with its figures and your decisions, plus a manifest with the file's hash. Findings are possible problems, not confirmed errors.", action: <Button onClick={accountantPack}>Export findings (CSV)</Button> },
     { icon: Upload, title: "Restore from a backup", text: "Replaces what is here with the file you choose.", action: <Button onClick={() => file.current?.click()}>Choose backup file</Button> },
-    { icon: RotateCcw, title: "Load sample data", text: "Fictional vendors and invoices, so you can look around.", action: <Button onClick={() => { actions.resetDemo(); setMsg({ ok: true, text: "Sample data loaded." }); }}>Load sample data</Button> },
+    { icon: RotateCcw, title: "Load sample data", text: "Fictional vendors and invoices, so you can look around. This replaces what is here now, so you will be asked first if you have your own data.", action: <Button onClick={() => { if (hasOwnData(s)) setConfirmSample(true); else { actions.resetDemo(); setMsg({ ok: true, text: "Sample data loaded." }); } }}>Load sample data</Button> },
     { icon: Trash2, title: "Erase everything", text: "Removes every invoice, vendor and case, and blanks your profile.", action: <Button variant="danger" onClick={() => setConfirm(true)}>Erase all data</Button> },
   ];
 
@@ -108,10 +117,14 @@ export function DataView() {
           <Button variant="primary" onClick={() => { if (!pending) return; const res = actions.restore(pending.raw); setMsg(res ? { ok: true, text: res.dropped ? `Backup restored. ${res.dropped} invalid or repeated record${res.dropped === 1 ? " was" : "s were"} skipped.` : "Backup restored." } : { ok: false, text: "That file is not an Overbill backup. Nothing was changed." }); setPending(null); }}>Replace my data</Button>
         </div>
       </Modal>
-      <Modal open={locked !== null} onClose={() => { setLocked(null); setUnlockWith(""); }} title="This backup is encrypted">
+      <Modal open={locked !== null} onClose={cancelUnlock} title="This backup is encrypted">
         <label htmlFor="bk-unlock" className="text-sm text-muted-foreground">Enter the passphrase you chose when you made it.</label>
         <input id="bk-unlock" type="password" autoComplete="current-password" value={unlockWith} onChange={(e) => setUnlockWith(e.target.value)} className="mt-2 h-11 w-full rounded-xl border bg-card px-3 text-sm" />
-        <div className="mt-5 flex justify-end gap-2"><Button onClick={() => { setLocked(null); setUnlockWith(""); }}>Cancel</Button><Button variant="primary" onClick={unlock}>Unlock</Button></div>
+        <div className="mt-5 flex justify-end gap-2"><Button onClick={cancelUnlock}>Cancel</Button><Button variant="primary" onClick={unlock}>Unlock</Button></div>
+      </Modal>
+      <Modal open={confirmSample} onClose={() => setConfirmSample(false)} title="Replace your data with sample data?">
+        <p className="text-sm text-muted-foreground">Loading the sample set replaces your invoices, credit notes, vendors, agreed rates, review decisions and recovery cases with fictional ones. Your profile and settings stay. Download a backup first if you want to keep what you have.</p>
+        <div className="mt-5 grid gap-2 sm:flex sm:justify-end"><Button onClick={() => setConfirmSample(false)}>Cancel</Button><Button onClick={backup}>Download backup first</Button><Button variant="danger" onClick={() => { actions.resetDemo(); setConfirmSample(false); setMsg({ ok: true, text: "Sample data loaded." }); }}>Replace with sample data</Button></div>
       </Modal>
       <Modal open={confirm} onClose={() => setConfirm(false)} title="Erase all data?">
         <p className="text-sm text-muted-foreground">This permanently removes all invoices, vendors and recovery cases, and blanks your profile. Download a backup first if you want a copy.</p>

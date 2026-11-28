@@ -8,7 +8,7 @@
 export const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? "";
 
 type Credential = { credential?: string };
-type GsiNotification = { isNotDisplayed(): boolean; isSkippedMoment(): boolean };
+type GsiNotification = { isNotDisplayed(): boolean; isSkippedMoment(): boolean; isDismissedMoment?(): boolean; getDismissedReason?(): string };
 declare global {
   interface Window {
     google?: { accounts: { id: { initialize(o: { client_id: string; callback: (c: Credential) => void; use_fedcm_for_prompt?: boolean }): void; prompt(cb?: (n: GsiNotification) => void): void } } };
@@ -43,7 +43,11 @@ function decode(jwt: string): Record<string, unknown> | null {
 export async function signInWithGoogle(): Promise<GoogleProfile> {
   if (!GOOGLE_CLIENT_ID) throw new Error("Google sign-in is not set up yet.");
   await loadGsi();
-  return new Promise<GoogleProfile>((resolve, reject) => {
+  return new Promise<GoogleProfile>((resolveRaw, rejectRaw) => {
+    // Under FedCM a cancelled prompt may emit no "skipped" signal, so the wait is bounded: the caller always gets a profile or an error.
+    const giveUp = setTimeout(() => rejectRaw(new Error("Google sign-in was closed or timed out. Try again.")), 90_000);
+    const resolve = (p: GoogleProfile) => { clearTimeout(giveUp); resolveRaw(p); };
+    const reject = (e: Error) => { clearTimeout(giveUp); rejectRaw(e); };
     window.google!.accounts.id.initialize({
       client_id: GOOGLE_CLIENT_ID,
       callback: ({ credential }) => {
@@ -54,7 +58,8 @@ export async function signInWithGoogle(): Promise<GoogleProfile> {
       },
     });
     window.google!.accounts.id.prompt((n) => {
-      if (n.isNotDisplayed() || n.isSkippedMoment()) reject(new Error("Google did not open. Check that pop-ups and third-party sign-in are allowed, then try again."));
+      if (n.isDismissedMoment?.() && n.getDismissedReason?.() !== "credential_returned") reject(new Error("Google sign-in was closed. Try again."));
+      else if (n.isNotDisplayed() || n.isSkippedMoment()) reject(new Error("Google did not open. Check that pop-ups and third-party sign-in are allowed, then try again."));
     });
   });
 }

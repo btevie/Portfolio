@@ -11,7 +11,8 @@ const MAX_PDF_PAGES = 5;
 export async function pdfToText(data: ArrayBuffer): Promise<string> {
   const pdfjs = await import("pdfjs-dist");
   pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
-  const task = pdfjs.getDocument({ data: new Uint8Array(data), useSystemFonts: false });
+  // pdf.js hands the bytes to its worker, which takes ownership. Give it a copy so the caller's buffer survives for scan recovery.
+  const task = pdfjs.getDocument({ data: new Uint8Array(data.slice(0)), useSystemFonts: false });
   const doc = await task.promise;
   try {
     if (doc.numPages > MAX_PDF_PAGES) throw new PdfPageLimitError(`This PDF has more than ${MAX_PDF_PAGES} pages. Export it as a CSV or paste the invoice text so no line items are missed.`);
@@ -29,18 +30,24 @@ export async function pdfToText(data: ArrayBuffer): Promise<string> {
   }
 }
 
-/** Draws the first pages of a PDF to images so a scan can be read by OCR. Runs in the browser; nothing is uploaded. */
-export async function pdfToImages(data: ArrayBuffer, maxPages = 2): Promise<Blob[]> {
+/** Largest canvas drawn for OCR: enough detail to read a page, small enough that no page can exhaust browser memory. */
+const MAX_CANVAS_SIDE = 4096;
+const MAX_CANVAS_PIXELS = 16_000_000;
+
+/** Draws the pages of a PDF to images so a scan can be read by OCR. Every permitted page is drawn, so a total on a later page is not missed. */
+export async function pdfToImages(data: ArrayBuffer, maxPages = MAX_PDF_PAGES): Promise<Blob[]> {
   const pdfjs = await import("pdfjs-dist");
   pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
-  const task = pdfjs.getDocument({ data: new Uint8Array(data), useSystemFonts: false });
+  const task = pdfjs.getDocument({ data: new Uint8Array(data.slice(0)), useSystemFonts: false });
   const doc = await task.promise;
   try {
     if (doc.numPages > MAX_PDF_PAGES) throw new PdfPageLimitError(`This PDF has more than ${MAX_PDF_PAGES} pages. Export it as a CSV or paste the invoice text so no line items are missed.`);
     const out: Blob[] = [];
     for (let p = 1; p <= Math.min(doc.numPages, maxPages); p++) {
       const page = await doc.getPage(p);
-      const viewport = page.getViewport({ scale: 2 });
+      const base = page.getViewport({ scale: 1 });
+      const scale = Math.min(2, MAX_CANVAS_SIDE / Math.max(base.width, base.height), Math.sqrt(MAX_CANVAS_PIXELS / (base.width * base.height)));
+      const viewport = page.getViewport({ scale });
       const canvas = document.createElement("canvas");
       canvas.width = Math.ceil(viewport.width); canvas.height = Math.ceil(viewport.height);
       await page.render({ canvas, viewport }).promise;

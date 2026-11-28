@@ -63,13 +63,22 @@ export function AiSecondOpinionCard({ invoice }: { invoice: Invoice }) {
 
       if (!res.ok) throw new Error(`Endpoint returned HTTP ${res.status}`);
       const data = await res.json();
-      const raw = data?.choices?.[0]?.message?.content ?? "{}";
-      const parsed = JSON.parse(raw);
-      setFindings(Array.isArray(parsed.findings) ? parsed.findings : []);
+      const raw = data?.choices?.[0]?.message?.content;
+      if (typeof raw !== "string") throw new Error("The endpoint did not return a message");
+      const parsed: unknown = JSON.parse(raw);
+      // An answer that is not the expected shape is an error, never "no anomalies". Each finding must be an object with a text reason.
+      const obj = parsed && typeof parsed === "object" ? (parsed as { findings?: unknown; clean?: unknown }) : undefined;
+      const list = obj?.findings;
+      if (!Array.isArray(list) || typeof obj?.clean !== "boolean") throw new Error("The model's answer was not in the expected format");
+      if (list.length === 0 && obj.clean === false) throw new Error("The model did not give a clear answer (no findings, but it did not say the invoice is clean)");
+      const clean: AiFinding[] = list.filter((f): f is Record<string, unknown> => f !== null && typeof f === "object" && typeof (f as { reason?: unknown }).reason === "string")
+        .map((f) => ({ code: typeof f.code === "string" ? f.code : undefined, overcharge: typeof f.overcharge === "number" || typeof f.overcharge === "string" ? f.overcharge : undefined, reason: f.reason as string, action: typeof f.action === "string" ? f.action : undefined }));
+      if (clean.length < list.length) throw new Error("Some of the model's findings were not in the expected format");
+      setFindings(clean);
     } catch (e) {
       setError(
         e instanceof Error
-          ? `${e.message}. Make sure local Ollama is running (OLLAMA_ORIGINS="*" ollama serve) or check your API key/endpoint.`
+          ? `${e.message}. Make sure local Ollama is running (OLLAMA_ORIGINS="${window.location.origin}" ollama serve) or check your API key/endpoint.`
           : "Could not reach AI endpoint."
       );
     } finally {

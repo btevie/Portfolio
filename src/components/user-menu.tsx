@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { Database, FlaskConical, ImagePlus, UserRound, Settings } from "lucide-react";
+import { Database, FlaskConical, ImagePlus, UserRound, Settings, Store } from "lucide-react";
 import { Avatar } from "@/components/avatar";
 import { ProfilePictureDialog } from "@/components/profile-picture-dialog";
 import { Button, Modal } from "@/components/ui";
@@ -48,6 +48,7 @@ export function UserMenu({ size = 40 }: { size?: number }) {
             </div>
             <div className="my-1 border-t" />
             <button type="button" role="menuitem" className={item} onClick={() => { setOpen(false); setDialog(true); }}><ImagePlus className="size-4 text-muted-foreground" aria-hidden />Change profile picture</button>
+            <Link role="menuitem" href="/vendors" className={`${item} lg:hidden`} onClick={() => setOpen(false)}><Store className="size-4 text-muted-foreground" aria-hidden />Vendors</Link>
             <Link role="menuitem" href="/settings" className={item} onClick={() => setOpen(false)}><Settings className="size-4 text-muted-foreground" aria-hidden />Settings</Link>
             <button type="button" role="menuitem" className={item} onClick={() => { setOpen(false); if (hasSample) actions.removeSample(); else if (hasOwnInvoices) setConfirm(true); else loadSample(); }}><FlaskConical className="size-4 text-muted-foreground" aria-hidden />{hasSample ? "Remove sample data" : "Load sample data"}</button>
             <Link role="menuitem" href="/data" className={item} onClick={() => setOpen(false)}><Database className="size-4 text-muted-foreground" aria-hidden />Your data</Link>
@@ -58,7 +59,7 @@ export function UserMenu({ size = 40 }: { size?: number }) {
       </AnimatePresence>
       <ProfilePictureDialog open={dialog} onClose={() => setDialog(false)} />
       <Modal open={confirm} onClose={() => setConfirm(false)} title="Replace your data with sample data?">
-        <p className="text-sm text-muted-foreground">This swaps your invoices, vendors and recovery cases for the fictional sample set. Your profile and settings stay. Download a backup from Your data first if you want to keep what you have.</p>
+        <p className="text-sm text-muted-foreground">This swaps your invoices, credit notes, vendors, agreed rates, review decisions and recovery cases for the fictional sample set. Your profile and settings stay. Download a backup from Your data first if you want to keep what you have.</p>
         <div className="mt-5 flex justify-end gap-2"><Button onClick={() => setConfirm(false)}>Cancel</Button><Button variant="primary" onClick={loadSample}>Load sample data</Button></div>
       </Modal>
     </div>

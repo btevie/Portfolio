@@ -12,7 +12,7 @@ export function TopBar() {
   const [q, setQ] = useState("");
 
   useEffect(() => {
-    const k = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); box.current?.focus(); } };
+    const k = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { if (!box.current || box.current.offsetParent === null) return; /* hidden on phones: leave the browser shortcut alone */ e.preventDefault(); box.current.focus(); } };
     window.addEventListener("keydown", k);
     return () => window.removeEventListener("keydown", k);
   }, []);

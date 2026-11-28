@@ -145,7 +145,7 @@ export function VendorDetail({ id }: { id: string }) {
             </form>
           </Disclosure>
 
-          <ContractCard vendor={vendor} />
+          <ContractCard key={vendor.id} vendor={vendor} />
 
           <Disclosure title="Monitoring">
             <div className="divide-y divide-line px-5">
@@ -191,9 +191,9 @@ function ContractCard({ vendor }: { vendor: Vendor }) {
   return (
     <Disclosure title="Contract & renewal" subtitle="Optional: a price cap and a renewal date">
       <div className="mb-3 rounded-xl border border-border bg-muted/40 p-3">
-        <label className="block text-xs font-medium text-muted-foreground">Auto-fill from pasted quote or contract text (NL/EN)</label>
+        <label htmlFor="quote-text" className="block text-xs font-medium text-muted-foreground">Auto-fill from pasted quote or contract text (NL/EN)</label>
         <div className="mt-1.5 flex flex-col gap-2 sm:flex-row">
-          <input type="text" placeholder="e.g. Verlenging 01-04-2027, opzegtermijn 1 maand, max 3% indexatie" className={fieldClass} value={quoteText} onChange={(e) => setQuoteText(e.target.value)} />
+          <input id="quote-text" type="text" placeholder="e.g. Verlenging 01-04-2027, opzegtermijn 1 maand, max 3% indexatie" className={fieldClass} value={quoteText} onChange={(e) => setQuoteText(e.target.value)} />
           <Button type="button" variant="secondary" size="sm" onClick={extractFromQuote}>Extract terms</Button>
         </div>
       </div>

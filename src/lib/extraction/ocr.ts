@@ -1,4 +1,5 @@
 import { pdfLinesToText } from "./pdf-layout";
+import { keepCreditSignal } from "./credit";
 
 export class OcrError extends Error {}
 
@@ -22,7 +23,7 @@ export async function ocrToText(images: Blob[]): Promise<string> {
       const { data } = await worker.recognize(img);
       lines.push(...data.text.split(/\r?\n/));
     }
-    const text = pdfLinesToText(lines);
+    const text = keepCreditSignal(lines.join("\n"), pdfLinesToText(lines));
     if (!/\|/.test(text)) throw new OcrError("Couldn't find any line items in that image. Try a sharper, straight-on photo, or paste the invoice text instead.");
     return text;
   } finally {

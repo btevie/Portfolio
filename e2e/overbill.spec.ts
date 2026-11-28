@@ -295,7 +295,7 @@ test("pasted text and CSV are parsed for real; missing fields trigger a review s
   await page.goto("/invoices/new");
   const csv = "description,quantity,unit_price\nConsulting,10,90.00\n";
   await page.getByLabel("Choose invoice files").setInputFiles({ name: "acme.csv", mimeType: "text/csv", buffer: Buffer.from(csv) });
-  await page.getByRole("button", { name: /Check 1 invoice/ }).click();
+  await page.getByRole("button", { name: /Read and check 1 invoice/ }).click();
   await expect(page.getByText("Some invoice details couldn't be extracted confidently.")).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText("Please confirm").first()).toBeVisible();
   await page.getByLabel("Vendor", { exact: true }).fill("Meridian Accounting");
@@ -331,7 +331,7 @@ test("a file whose contents don't match its extension is refused", async ({ page
   await page.goto("/invoices/new");
   await page.getByLabel("Choose invoice files").setInputFiles({ name: "invoice.pdf", mimeType: "application/pdf", buffer: Buffer.from("<html><script>alert(1)</script></html>") });
   await expect(page.locator("main [role=alert]")).toContainText("contents don't match");
-  await expect(page.getByRole("button", { name: /Check \d+ invoice/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Read and check \d+ invoice/ })).toHaveCount(0);
 });
 
 test("damaged saved data never bricks the app", async ({ page }) => {
@@ -385,7 +385,7 @@ test("an oversized CSV is rejected with a clear message", async ({ page }) => {
   await page.goto("/invoices/new");
   const rows = "description,quantity,unit_price\n" + Array.from({ length: 501 }, () => "Item,1,1.00").join("\n");
   await page.getByLabel("Choose invoice files").setInputFiles({ name: "big.csv", mimeType: "text/csv", buffer: Buffer.from(rows) });
-  await page.getByRole("button", { name: /Check 1 invoice/ }).click();
+  await page.getByRole("button", { name: /Read and check 1 invoice/ }).click();
   await expect(page.locator("main [role=alert]")).toContainText("more than 500 line items");
 });
 

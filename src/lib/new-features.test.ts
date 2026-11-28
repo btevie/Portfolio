@@ -64,3 +64,33 @@ describe("export pack", () => {
     expect(manifest.note).toMatch(/not confirmed errors/);
   });
 });
+
+describe("older saved settings", () => {
+  it("keeps the user's other settings when the reminders block is missing or only partly there", async () => {
+    const { parseStoredState } = await import("./data/validate-state");
+    const base = createSeedState();
+    for (const reminders of [undefined, { overdueReview: false }]) {
+      const old = JSON.parse(JSON.stringify(base));
+      old.settings.currency = "GBP";
+      if (reminders === undefined) delete old.settings.reminders; else old.settings.reminders = reminders;
+      const r = parseStoredState(JSON.stringify(old))!;
+      expect(r.state.settings.currency).toBe("GBP");
+      expect(r.state.settings.reminders.upcomingDue).toBe(true);
+      expect(r.state.settings.reminders.overdueReview).toBe(reminders ? false : true);
+    }
+  });
+});
+
+describe("dispute pack HTML", () => {
+  it("never lets markup in a vendor name or the edited message run", async () => {
+    const { buildDisputeKit, disputePackHtml } = await import("./dispute-kit");
+    const state = createSeedState();
+    const audits = auditAll(state);
+    const f = Object.values(audits).flatMap((a) => a.findings)[0];
+    const inv = { ...state.invoices.find((i) => i.id === f.invoiceId)!, vendorName: '<img src=x onerror="document.body.dataset.executed=1">', number: "<script>alert(1)</script>" };
+    const kit = buildDisputeKit(inv, f, undefined, "Me");
+    const html = disputePackHtml(inv, f, kit, '<svg onload="x()">');
+    expect(html).not.toMatch(/<img src=x|<script>alert|<svg onload/);
+    expect(html).toContain("&lt;img src=x");
+  });
+});

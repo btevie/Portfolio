@@ -1,4 +1,5 @@
 import { isCurrency } from "../currencies";
+import { MAX_CREDIT_EVENTS } from "../credits";
 import { isValidDecimal, MAX_INT_DIGITS } from "../audit/money";
 import { parseISO } from "../audit/normalize";
 import type { AppState, ContractRate, CreditEvent, CreditRecord, FindingDecision, Invoice, InvoiceLineItem, RecoveryRecord, UserSettings, Vendor } from "../types";
@@ -101,7 +102,6 @@ export function cleanRecoveryExtras(r: RecoveryRecord): RecoveryRecord {
 }
 
 const CREDIT_EVENTS = ["linked", "unlinked", "applied", "refunded", "reversed", "note"] as const;
-const MAX_CREDIT_EVENTS = 300;
 
 function creditEvent(x: unknown): x is CreditEvent {
   if (!isObj(x) || !recordId(x.id) || !str(x.at, 40) || Number.isNaN(Date.parse(x.at)) || !oneOf(x.kind, CREDIT_EVENTS) || !str(x.text, 2000)) return false;
@@ -206,7 +206,7 @@ export function parseStoredState(raw: string): { state: AppState; dropped: numbe
   const user = isObj(x.user) && str(x.user.id) && str(x.user.name, 200) && str(x.user.email, 320) && str(x.user.company, 200)
     ? { id: x.user.id, name: x.user.name, email: x.user.email, company: x.user.company, ...(typeof x.user.picture === "string" && validPicture(x.user.picture) ? { picture: x.user.picture } : {}) } : seed.user;
   // Settings saved by older versions lack the newer fields; fill them from defaults before validating.
-  if (isObj(x.settings)) { const { notifications: _old, ...rest } = x.settings; void _old; x.settings = { ...seed.settings, ...rest }; }
+  if (isObj(x.settings)) { const { notifications: _old, ...rest } = x.settings; void _old; x.settings = { ...seed.settings, ...rest, reminders: { ...seed.settings.reminders, ...(isObj(rest.reminders) ? rest.reminders : {}) } }; }
   const s = settings(x.settings)
     ? { ...x.settings, privacy: { keepUploadedFiles: false as const, analytics: x.settings.privacy.analytics } } : seed.settings;
   if (!settings(x.settings)) dropped++;

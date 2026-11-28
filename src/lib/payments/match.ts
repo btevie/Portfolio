@@ -101,9 +101,11 @@ export function parseStatement(text: string, opts: { convention?: SignConvention
   const find = (re: RegExp) => head.findIndex((h) => re.test(h));
   const dateI = find(/date|datum|fecha|data\b/);
   const descIs = head.map((h, i) => (/(description|details|memo|narrative|reference|payee|merchant|name|particulars|omschrijving|beschrijving|verwendungszweck|buchungstext|libell|concepto|descripci)/.test(h) ? i : -1)).filter((i) => i >= 0);
-  const amountI = find(/^(amount|value|sum)\b|\bamount\b/);
   const outI = find(/(debit|d[eé]bit|withdrawal|paid out|money out|outgoing|soll|af\b)/);
   const inI = find(/(credit|cr[eé]dit|deposit|paid in|money in|incoming|haben|bij\b)/);
+  // "Debit Amount" / "Credit Amount" are the split columns, not the single signed Amount column.
+  const amountMatch = find(/^(amount|value|sum)\b|\bamount\b/);
+  const amountI = amountMatch === outI || amountMatch === inI ? -1 : amountMatch;
   if (dateI < 0 || !descIs.length || (amountI < 0 && outI < 0)) return { ...empty, error: "Couldn't find the date, description and amount columns. Export your statement as CSV with headers such as Date, Description and Amount." };
 
   const split = outI >= 0 && amountI < 0;
@@ -126,7 +128,11 @@ export function parseStatement(text: string, opts: { convention?: SignConvention
     let out: string | null = null, inn: string | null = null, unclear = "";
     if (split) {
       const o = toAmount(r[outI]), c = inI >= 0 ? toAmount(r[inI]) : null;
-      if (o !== null) out = o.replace("-", ""); else if (c !== null) inn = c.replace("-", "");
+      const oNz = o !== null && !D(o).isZero(), cNz = c !== null && !D(c).isZero();
+      if (oNz && cNz) unclear = "Both the Debit and Credit columns have an amount";
+      else if (oNz) out = o!.replace("-", "");
+      else if (cNz) inn = c!.replace("-", ""); // a 0.00 debit must not hide the real credit beside it
+      else if (o !== null || c !== null) out = "0"; // a genuinely empty movement: nothing to match
       else unclear = "No readable amount in the Debit or Credit column";
     } else {
       const a = toAmount(r[amountI]);
@@ -145,7 +151,8 @@ export function parseStatement(text: string, opts: { convention?: SignConvention
   return { txs, incoming, unreadable, skipped: unreadable.length, convention };
 }
 
-const idOf = (txs: BankTx[]) => txs.map((t) => `${t.date}|${t.amount}|${t.line}`).join(";");
+/** Scoped by who the payments are for, so two vendors with payments of the same date, amount and row never share an id (a dismissal or tracked case for one must not hide the other). */
+const idOf = (scope: string, txs: BankTx[]) => `${scope}#${txs.map((t) => `${t.date}|${t.amount}|${t.line}`).join(";")}`;
 const sameVendor = (inv: Invoice, bills: Invoice[]) => bills.filter((b) => b.currency === inv.currency && normalizeVendor(b.vendorName) === normalizeVendor(inv.vendorName));
 const days = (a: string, b: string) => Math.abs(((parseISO(a) ?? 0) - (parseISO(b) ?? 0)) / 86_400_000);
 const words = (s: string) => normalizeVendor(s).split(/\s+/).filter((w) => w.length >= 4);
@@ -174,15 +181,18 @@ export function findDuplicatePayments(txs: BankTx[], invoices: Invoice[]): Dupli
   // 1. The memo names the invoice number: two such payments for one invoice is a double payment.
   const byInvoice = new Map<string, { inv: Invoice; hits: BankTx[] }>();
   for (const t of txs) {
-    const inv = bills.find((i) => sameAmount(t, i) && numberInMemo(t, i));
-    if (!inv) continue;
+    // The same number and amount can exist at two vendors: use the vendor name to choose, and never guess between equals.
+    let candidates = bills.filter((i) => sameAmount(t, i) && numberInMemo(t, i));
+    if (candidates.length > 1) candidates = candidates.filter((i) => vendorInMemo(t, i));
+    if (candidates.length !== 1) continue;
+    const inv = candidates[0];
     used.add(t.line);
     const g = byInvoice.get(inv.id) ?? { inv, hits: [] };
     g.hits.push(t); byInvoice.set(inv.id, g);
   }
   for (const { inv, hits } of byInvoice.values()) {
     if (hits.length < 2) continue;
-    out.push({ id: idOf(hits), strength: "strong", alternatives: sameVendor(inv, bills),
+    out.push({ id: idOf(inv.id, hits), strength: "strong", alternatives: sameVendor(inv, bills),
       reasons: [`Each payment is ${inv.total}, exactly the total of invoice ${inv.number}.`, `Each description contains the invoice number ${inv.number}.`, `${hits.length} payments, but the invoice was billed once.`],
       kind: "same-invoice", vendorName: inv.vendorName, invoice: inv, txs: hits, refundable: D(inv.total).times(hits.length - 1),
       why: `${hits.length} payments of ${inv.total} quote invoice ${inv.number} from ${inv.vendorName}, which was billed once.` });
@@ -197,14 +207,24 @@ export function findDuplicatePayments(txs: BankTx[], invoices: Invoice[]): Dupli
     const g = byVendorAmount.get(key) ?? { vendor: candidates, hits: [] };
     g.hits.push(t); byVendorAmount.set(key, g);
   }
-  for (const { vendor, hits } of byVendorAmount.values()) {
-    const extra = hits.length - vendor.length;
+  for (const { vendor, hits: vendorOnly } of byVendorAmount.values()) {
+    // An invoice already paid more than once by quoted-number payments belongs to the strong match above: it cannot also explain these.
+    const reserved = new Set(vendor.filter((i) => (byInvoice.get(i.id)?.hits.length ?? 0) >= 2).map((i) => i.id));
+    const free = vendor.filter((i) => !reserved.has(i.id));
+    // A payment that quoted one of the remaining invoices already used up that invoice's single payment, so count it too.
+    const numbered = free.flatMap((i) => { const g = byInvoice.get(i.id); return g && g.hits.length === 1 ? g.hits : []; });
+    const hits = [...numbered, ...vendorOnly];
+    const extra = hits.length - free.length;
+    hits.forEach((t) => used.add(t.line)); // explained by an invoice, so the repeat-charge pattern below must not flag them again
     if (extra <= 0) continue;
-    hits.forEach((t) => used.add(t.line));
-    out.push({ id: idOf(hits), strength: "medium", alternatives: sameVendor(vendor[0], bills),
-      reasons: [`Each payment is ${hits[0].amount}, the same as ${vendor.length} invoice${vendor.length === 1 ? "" : "s"} from ${vendor[0].vendorName}.`, `Descriptions mention the vendor name, but no invoice number.`, `${hits.length} payments against ${vendor.length} invoice${vendor.length === 1 ? "" : "s"} of that amount.`],
-      kind: "same-invoice", covered: vendor.length, vendorName: vendor[0].vendorName, invoice: vendor[0], txs: hits, refundable: D(hits[0].amount).times(extra),
-      why: `${hits.length} payments of ${hits[0].amount} went to ${vendor[0].vendorName}, but only ${vendor.length} invoice${vendor.length === 1 ? "" : "s"} of that amount ${vendor.length === 1 ? "is" : "are"} on file.` });
+    const ref = free[0] ?? vendor[0];
+    const n = (k: number) => `${k} invoice${k === 1 ? "" : "s"}`;
+    out.push({ id: idOf(ref.id, hits), strength: "medium", alternatives: sameVendor(ref, bills),
+      reasons: [`Each payment is ${hits[0].amount}, the same as ${n(free.length)} from ${ref.vendorName} still unpaid by a quoted-number payment.`,
+        numbered.length ? `${numbered.length} payment${numbered.length === 1 ? "" : "s"} quote${numbered.length === 1 ? "s" : ""} an invoice number; the other ${vendorOnly.length} only mention the vendor name.` : `Descriptions mention the vendor name, but no invoice number.`,
+        `${hits.length} payments against ${n(free.length)} of that amount.`],
+      kind: "same-invoice", covered: free.length, vendorName: ref.vendorName, invoice: ref, txs: hits, refundable: D(hits[0].amount).times(extra),
+      why: `${hits.length} payments of ${hits[0].amount} went to ${ref.vendorName}, but only ${n(free.length)} of that amount ${free.length === 1 ? "is" : "are"} on file to explain them.` });
   }
   // Same amount and memo again within 7 days, not already explained above.
   const rest = txs.filter((t) => !used.has(t.line));
@@ -215,7 +235,7 @@ export function findDuplicatePayments(txs: BankTx[], invoices: Invoice[]): Dupli
     if (twins.length >= 2) {
       twins.forEach((u) => seen.add(u.line));
       out.push({
-        id: idOf(twins), strength: "weak",
+        id: idOf(normalizeVendor(t.description), twins), strength: "weak",
         reasons: [`Same amount (${t.amount}) and description, ${twins.length} times within 7 days.`, "No invoice on file matches, so this is only a pattern."],
         kind: "repeat-charge", vendorName: t.description.slice(0, 60), txs: twins, refundable: D(t.amount).times(twins.length - 1),
         why: `The same ${t.amount} went to "${t.description.slice(0, 50)}" ${twins.length} times within a week. Fine for a subscription that bills often; worth a look if it should have been one payment.`,
@@ -242,7 +262,15 @@ export function applyCorrections(dups: DuplicatePayment[], c: Corrections): { sh
     const covered = d.covered ?? 1;
     if (txs.length <= covered) continue;
     const linked = d.alternatives?.find((i) => i.id === c.relinked.get(d.id)) ?? d.invoice;
-    shown.push({ ...d, invoice: linked, txs, refundable: D(txs[0].amount).times(txs.length - covered) });
+    const changed = txs.length !== d.txs.length || linked !== d.invoice;
+    // The original reasons describe the original payments and invoice; once the user changes either, say so instead of repeating stale evidence.
+    const edited = changed ? {
+      strength: "weak" as const,
+      reasons: [`You adjusted this match: ${txs.length} payment${txs.length === 1 ? "" : "s"} of ${txs[0].amount}${linked ? `, compared with invoice ${linked.number} from ${linked.vendorName}` : ""}.`],
+      why: `After your changes, ${txs.length} payment${txs.length === 1 ? "" : "s"} of ${txs[0].amount} remain against ${covered} invoice${covered === 1 ? "" : "s"} on file.`,
+      ...(linked ? { vendorName: linked.vendorName } : {}),
+    } : {};
+    shown.push({ ...d, ...edited, invoice: linked, txs, refundable: D(txs[0].amount).times(txs.length - covered) });
   }
   return { shown, dismissed };
 }

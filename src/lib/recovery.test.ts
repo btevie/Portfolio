@@ -88,4 +88,33 @@ describe("recovery case timeline", () => {
     expect(c.followUpDate).toBeUndefined();
     expect(c.events).toHaveLength(1);
   });
+
+  it("a further receipt on a legacy recovered case keeps the receipt already counted", () => {
+    const legacy = base({ status: "recovered", confirmedAmount: "200.00" });
+    const after = run(legacy, { kind: "received", amount: "50", date: "2026-11-20" });
+    const f = caseFigures(after);
+    expect([f.received.toFixed(2), f.outstanding.toFixed(2)]).toEqual(["150.00", "50.00"]);
+  });
+});
+
+
+describe("correcting a mistaken amount", () => {
+  it("restores what is outstanding, reopens a case marked recovered, and keeps the earlier entry", () => {
+    const r0 = run(base({ status: "vendor_responded", amount: "100.00" }), { kind: "promise", amount: "100" });
+    const wrong = run(r0, { kind: "received", date: "2026-11-20", amount: "100" });
+    expect(wrong.status).toBe("recovered");
+    expect(validateEvent(wrong, { kind: "correct", field: "received", amount: "10", text: "typed 100 instead of 10" }, "2026-11-20")).toBeNull();
+    const fixed = run(wrong, { kind: "correct", field: "received", amount: "10", text: "typed 100 instead of 10" });
+    expect(caseFigures(fixed).received.toFixed(2)).toBe("10.00");
+    expect(caseFigures(fixed).outstanding.toFixed(2)).toBe("90.00");
+    expect(fixed.status).toBe("credit_issued");
+    expect(fixed.events!.some((e) => e.kind === "received" && e.amount === "100.00")).toBe(true);
+    expect(fixed.events!.some((e) => e.kind === "correction")).toBe(true);
+  });
+  it("needs a reason, refuses negatives and totals above what was promised", () => {
+    const r0 = run(base({ status: "vendor_responded", amount: "100.00" }), { kind: "promise", amount: "60" });
+    expect(validateEvent(r0, { kind: "correct", field: "received", amount: "5", text: "" }, "2026-11-20")).toMatch(/what was wrong/);
+    expect(validateEvent(r0, { kind: "correct", field: "received", amount: "-5", text: "x" }, "2026-11-20")).toMatch(/zero or more/);
+    expect(validateEvent(r0, { kind: "correct", field: "received", amount: "61", text: "x" }, "2026-11-20")).toMatch(/more than the promised/);
+  });
 });

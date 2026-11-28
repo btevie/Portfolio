@@ -44,7 +44,8 @@ export function priorInvoices(inv: Invoice, ctx: AuditContext): Invoice[] {
       if (duplicateIndex >= 0) {
         const old = copies[duplicateIndex];
         const outputIndex = out.indexOf(old);
-        if (outputIndex >= 0) out[outputIndex] = o;
+        // The re-sent copy is the newest candidate so far: drop the old entry and append, which keeps oldest -> newest order.
+        if (outputIndex >= 0) { out.splice(outputIndex, 1); out.push(o); }
         copies[duplicateIndex] = o;
         continue;
       }

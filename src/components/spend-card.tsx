@@ -8,6 +8,7 @@ type Month = { label: string; total: number; flagged: number };
 /** Latest month's spend as the headline, with the monthly trend line underneath. */
 export function SpendCard({ months, format }: { months: Month[]; format: (n: number) => string }) {
   const cur = months[months.length - 1];
+  if (!cur) return null;
   const prev = months[months.length - 2];
   const delta = prev && prev.total > 0 ? Math.round(((cur.total - prev.total) / prev.total) * 1000) / 10 : null;
   return (

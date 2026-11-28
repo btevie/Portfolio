@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import { Banknote, CalendarClock, Handshake, MessageSquareReply, Send, StickyNote, Ticket } from "lucide-react";
 import { formatMoney } from "@/lib/audit/money";
 import { today } from "@/lib/data/selectors";
-import { actions } from "@/lib/data/store";
+import { actions, useAppState } from "@/lib/data/store";
 import { fmtDate, STATUS_LABEL } from "@/lib/format";
 import { caseFigures, nextAction, type EventInput } from "@/lib/recovery";
 import type { RecoveryEvent, RecoveryRecord } from "@/lib/types";
@@ -28,6 +28,7 @@ const EVENT_LABEL: Record<RecoveryEvent["kind"], string> = {
 const TONE: Record<string, "ok" | "warn" | "info" | "neutral"> = { recovered: "ok", credit_issued: "ok", dismissed: "neutral", flagged: "warn" };
 
 export function CaseDetail({ r }: { r: RecoveryRecord }) {
+  const vendorExists = useAppState().vendors.some((v) => v.id === r.vendorId); // removing sample data can leave a case whose vendor page no longer exists
   const f = caseFigures(r);
   const act = nextAction(r, today());
   const fmt = (d: { toFixed(n: number): string }) => formatMoney(d.toFixed(2), r.currency);
@@ -37,7 +38,7 @@ export function CaseDetail({ r }: { r: RecoveryRecord }) {
   const events = [...(r.events ?? [])].reverse();
   const done = r.status === "recovered" || r.status === "dismissed";
   const availableKinds = r.status === "credit_issued"
-    ? KINDS.filter((k) => k.id === "promise" || k.id === "applied" || k.id === "received")
+    ? KINDS // a late promise still needs "I chased them" and "they replied": those entries keep the promised and received totals as they are
     : r.status === "recovered"
       ? (f.outstanding.gt(0) ? KINDS.filter((k) => k.id === "applied" || k.id === "received") : [])
       : KINDS;
@@ -48,7 +49,7 @@ export function CaseDetail({ r }: { r: RecoveryRecord }) {
         <Pill tone={TONE[r.status] ?? "info"} className="w-fit">{STATUS_LABEL[r.status]}</Pill>
         <SheetTitle className="text-base leading-snug">{r.title}</SheetTitle>
         <SheetDescription>
-          {r.vendorId ? <Link href={`/vendors/${r.vendorId}`} className="text-primary hover:underline">{r.vendorName}</Link> : r.vendorName}
+          {r.vendorId && vendorExists ? <Link href={`/vendors/${r.vendorId}`} className="text-primary hover:underline">{r.vendorName}</Link> : r.vendorName}
           {r.invoiceId && <> · <Link href={`/invoices/${r.invoiceId}${r.findingId ? `?finding=${encodeURIComponent(r.findingId)}` : ""}`} className="text-primary hover:underline">View invoice and finding</Link></>}
           {!r.invoiceId && <> · Added by hand, not linked to a finding</>}
         </SheetDescription>
@@ -64,6 +65,8 @@ export function CaseDetail({ r }: { r: RecoveryRecord }) {
           </dl>
           <p className="mt-2 text-xs text-muted-foreground">Still to come: <span className="num font-medium text-foreground">{fmt(f.outstanding)}</span>. These are your own records; Overbill cannot see vendor or bank accounts, so nothing here is independently verified.</p>
         </section>
+
+        {r.status !== "dismissed" && (f.applied.gt(0) || f.received.gt(0)) && <CorrectionForm key={`${r.id}-${r.events?.length ?? 0}`} r={r} />}
 
         {act && (
           <section aria-label="Next action" className={`rounded-xl border p-3.5 ${act.tone === "bad" ? "border-bad/40 bg-bad-bg" : "bg-muted/40"}`}>
@@ -174,5 +177,39 @@ function EventForm({ r, kind, outstanding, onSaved }: { r: RecoveryRecord; kind:
       <div className="flex justify-end gap-2"><Button onClick={onSaved}>Cancel</Button><Button variant="primary" onClick={(e) => (e.currentTarget.form as HTMLFormElement).requestSubmit()}>Save to timeline</Button></div>
       <p className="text-xs text-muted-foreground"><StickyNote className="mr-1 inline size-3" aria-hidden />Saved on this device only, as your own record.</p>
     </form>
+  );
+}
+
+/** Fixes a mistaken "applied" or "received" total. The earlier entry stays in the timeline and the correction is added next to it. */
+function CorrectionForm({ r }: { r: RecoveryRecord }) {
+  const f = caseFigures(r);
+  const fields = [...(f.received.gt(0) ? [{ id: "received" as const, label: "Refund received", now: f.received }] : []), ...(f.applied.gt(0) ? [{ id: "applied" as const, label: "Credit applied", now: f.applied }] : [])];
+  const [field, setField] = useState<"applied" | "received">(fields[0]?.id ?? "received");
+  const current = fields.find((x) => x.id === field) ?? fields[0];
+  const [amount, setAmount] = useState("");
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState("");
+  if (!current) return null;
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const err = actions.recordRecoveryEvent(r.id, { kind: "correct", field, amount: amount.trim(), text: reason });
+    if (err) setError(err); else { setAmount(""); setReason(""); setError(""); }
+  }
+  return (
+    <details className="rounded-xl border bg-card px-3.5 py-2.5">
+      <summary className="min-h-11 cursor-pointer list-none py-2 text-sm font-medium">Entered the wrong amount? Correct it</summary>
+      <form onSubmit={submit} className="mt-2 space-y-3 pb-2">
+        <p className="text-xs text-muted-foreground">The original entry stays in the timeline and your correction is added beside it. If this reopens the case, it moves back to waiting for the rest.</p>
+        {fields.length > 1 && (
+          <Field label="Which amount" htmlFor={`fix-which-${r.id}`}>
+            <select id={`fix-which-${r.id}`} className={fieldClass} value={field} onChange={(e) => setField(e.target.value as "applied" | "received")}>{fields.map((x) => <option key={x.id} value={x.id}>{x.label} (now {formatMoney(x.now.toFixed(2), r.currency)})</option>)}</select>
+          </Field>
+        )}
+        <Field label={`Correct total for ${current.label.toLowerCase()} (${r.currency}), currently ${formatMoney(current.now.toFixed(2), r.currency)}`} htmlFor={`fix-amt-${r.id}`}><input id={`fix-amt-${r.id}`} inputMode="decimal" className={fieldClass} value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="e.g. 10.00" /></Field>
+        <Field label="What was wrong" htmlFor={`fix-why-${r.id}`}><Textarea id={`fix-why-${r.id}`} rows={2} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. I typed 100 instead of 10" /></Field>
+        {error && <p role="alert" className="text-sm text-bad">{error}</p>}
+        <div className="flex justify-end"><Button type="button" variant="primary" disabled={!amount.trim() || !reason.trim()} onClick={(e) => (e.currentTarget.form as HTMLFormElement).requestSubmit()}>Save correction</Button></div>
+      </form>
+    </details>
   );
 }

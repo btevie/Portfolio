@@ -14,4 +14,13 @@ describe("parseText performance and key/value parsing", () => {
     expect(e.vendorName).toBe("Acme Co");
     expect(e.number).toBe("A-1");
   });
+
+  it("does not backtrack on parentheses followed by a long run of spaces", async () => {
+    const { absoluteAmounts } = await import("./credit");
+    for (const text of ["(" + " ".repeat(20_000) + "x", "( -" + " ".repeat(20_000) + "x", "(" + "\t ".repeat(10_000) + "1"]) {
+      const t0 = performance.now();
+      absoluteAmounts(text);
+      expect(performance.now() - t0).toBeLessThan(500);
+    }
+  });
 });

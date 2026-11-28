@@ -3,6 +3,7 @@ import { useRef, useState } from "react";
 import { Download, LockKeyhole, Upload } from "lucide-react";
 import { markBackedUp } from "@/lib/backup";
 import { actions } from "@/lib/data/store";
+import { parseStoredState } from "@/lib/data/validate-state";
 import { decryptBackup, encryptBackup, MIN_PASSPHRASE } from "@/lib/vault";
 import type { AppState } from "@/lib/types";
 import { Button, fieldClass } from "@/components/ui";
@@ -12,7 +13,9 @@ export function EncryptedBackup({ state }: { state: AppState }) {
   const [pass, setPass] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState<{ json: string; invoices: number; cases: number; dropped: number } | null>(null); // decrypted, waiting for the person to confirm
   const file = useRef<HTMLInputElement>(null);
+  const gen = useRef(0); // only the latest restore may stage a backup
 
   async function download() {
     setBusy(true); setMsg(null);
@@ -30,14 +33,24 @@ export function EncryptedBackup({ state }: { state: AppState }) {
 
   async function restore(f: File | undefined) {
     if (!f) return;
-    setBusy(true); setMsg(null);
+    const mine = ++gen.current;
+    setBusy(true); setMsg(null); setPending(null); // a backup staged earlier must not stay confirmable while another one opens or after it fails
     try {
       const json = await decryptBackup(await f.text(), pass);
-      const r = actions.restore(json);
-      setMsg(r ? { ok: true, text: `Restored${r.dropped ? ` (${r.dropped} invalid records skipped)` : ""}.` } : { ok: false, text: "That backup didn't contain valid Overbill data." });
+      const parsed = parseStoredState(json);
+      if (mine !== gen.current) return;
+      if (parsed) setPending({ json, invoices: parsed.state.invoices.length, cases: parsed.state.recovery.length, dropped: parsed.dropped });
+      else setMsg({ ok: false, text: "That backup didn't contain valid Overbill data. Nothing was changed." });
     } catch (e) { setMsg({ ok: false, text: e instanceof Error ? e.message : "Couldn't open the backup." }); }
     if (file.current) file.current.value = "";
     setBusy(false);
+  }
+
+  function confirmRestore() {
+    if (!pending) return;
+    const r = actions.restore(pending.json);
+    setPending(null);
+    setMsg(r ? { ok: true, text: `Restored${r.dropped ? ` (${r.dropped} invalid records skipped)` : ""}.` } : { ok: false, text: "That backup didn't contain valid Overbill data. Nothing was changed." });
   }
 
   return (
@@ -52,8 +65,14 @@ export function EncryptedBackup({ state }: { state: AppState }) {
           <div className="mt-3 flex flex-wrap gap-2">
             <Button onClick={download} disabled={busy || pass.length < MIN_PASSPHRASE}><Download className="size-4" aria-hidden />Download encrypted backup</Button>
             <Button onClick={() => file.current?.click()} disabled={busy || !pass}><Upload className="size-4" aria-hidden />Restore from encrypted backup</Button>
-            <input ref={file} type="file" accept=".json,application/json" aria-label="Choose encrypted backup file" className="sr-only" onChange={(e) => restore(e.target.files?.[0])} />
+            <input ref={file} type="file" accept=".json,application/json" aria-label="Choose encrypted backup file" disabled={busy} className="sr-only" onChange={(e) => restore(e.target.files?.[0])} />
           </div>
+          {pending && (
+            <div role="alert" className="mt-3 rounded-xl border p-3 text-sm">
+              <p>This backup holds {pending.invoices} invoice{pending.invoices === 1 ? "" : "s"} and {pending.cases} recovery case{pending.cases === 1 ? "" : "s"}{pending.dropped ? ` (${pending.dropped} invalid records will be skipped)` : ""}. Restoring replaces everything currently here. Download a backup first if you may need it.</p>
+              <div className="mt-2 flex gap-2"><Button onClick={() => setPending(null)}>Cancel</Button><Button variant="primary" disabled={busy} onClick={confirmRestore}>Replace my data</Button></div>
+            </div>
+          )}
           {msg && <p role="status" className={msg.ok ? "mt-2 text-sm text-ok" : "mt-2 text-sm text-bad"}>{msg.text}</p>}
         </div>
       </div>

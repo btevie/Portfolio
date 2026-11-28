@@ -42,6 +42,11 @@ export function configFromSettings(s: Pick<UserSettings, "sensitivity" | "disabl
 
 const SEV = { high: 0, medium: 1, low: 2 } as const;
 
+/** Whether a finding id names this line. The line id must end the token: line "l1" is not line "l10". */
+export function findingNamesLine(findingId: string, lineId: string): boolean {
+  return findingId.endsWith(`-${lineId}`) || findingId.split(`line-${lineId}`).slice(1).some((rest) => !/^[\w-]/.test(rest));
+}
+
 export function classify(findings: AuditFinding[]): Classification {
   if (findings.some((f) => f.classification === "LIKELY_ERROR")) return "LIKELY_ERROR";
   return findings.length ? "REVIEW_NEEDED" : "CLEAR";
@@ -50,8 +55,37 @@ export function classify(findings: AuditFinding[]): Classification {
 /** Pure, deterministic audit. No I/O, no LLM, no floating point money. */
 export function auditInvoice(invoice: Invoice, ctx: AuditContext): AuditResult {
   const active = RULES.filter((r) => !ctx.config.disabledRules.includes(r.id as RuleId));
-  const forensic = [...forensicAuditFindings(invoice, ctx), ...inflationIndexFindings(invoice, ctx), ...forecastAnomalyFindings(invoice, ctx), ...vendorGraphFindings(invoice, ctx), ...reconcileMathFindings(invoice), ...unitDecompositionFindings(invoice, ctx), ...holtSeasonalFindings(invoice, ctx), ...cusumChangePointFindings(invoice, ctx), ...paymentGuardFindings(invoice, ctx), ...semanticNoveltyFindings(invoice, ctx), ...wkiStaircaseFindings(invoice, ctx), ...roundingBiasFindings(invoice, ctx), ...paymentArbitrageFindings(invoice)].filter((f) => !ctx.config.disabledRules.includes(f.ruleId));
-  const findings = [...active.flatMap((r) => r.run(invoice, ctx)), ...forensic]
+  const forensic = [...forensicAuditFindings(invoice, ctx), ...inflationIndexFindings(invoice, ctx), ...forecastAnomalyFindings(invoice, ctx), ...vendorGraphFindings(invoice, ctx), ...reconcileMathFindings(invoice), ...unitDecompositionFindings(invoice, ctx), ...holtSeasonalFindings(invoice, ctx), ...paymentGuardFindings(invoice, ctx), ...semanticNoveltyFindings(invoice, ctx), ...wkiStaircaseFindings(invoice, ctx), ...roundingBiasFindings(invoice, ctx), ...paymentArbitrageFindings(invoice)].filter((f) => !ctx.config.disabledRules.includes(f.ruleId));
+  const core = active.flatMap((r) => r.run(invoice, ctx));
+  // The statistical price detectors (CUSUM, forecasting, inflation index, ...) are for increases the core rules miss. When a core
+  // price or contract-rate finding already explains this invoice they would report, and add to the amount at stake, the same money again.
+  // Only the exposure a core finding really covers is hidden: an invoice-level core finding covers the whole invoice, but a
+  // contract-rate finding on one line must not hide an independent price rise on a different line.
+  // Line ids in the finding id are exact; the quoted description is only a fallback, because two lines can share a description
+  // and one finding must not mark the other as covered.
+  const lineIdsIn = (f: AuditFinding) => {
+    const byId = invoice.lineItems.filter((l) => findingNamesLine(f.id, l.id)).map((l) => l.id);
+    if (byId.length) return byId;
+    return invoice.lineItems.filter((l) => l.description.length >= 3 && f.evidence.some((e) => e.includes(`"${l.description}"`))).map((l) => l.id);
+  };
+  const coveredLines = new Set<string>();
+  let wholeInvoiceExplained = false;
+  for (const f of core) {
+    if (f.ruleId !== "price_history" && f.ruleId !== "contract_rate") continue;
+    const lines = f.ruleId === "contract_rate" ? lineIdsIn(f) : [];
+    if (lines.length) lines.forEach((id) => coveredLines.add(id)); else wholeInvoiceExplained = true;
+  }
+  const itemLines = invoice.lineItems.filter((l) => l.kind === "item");
+  const alreadyCovered = (f: AuditFinding) => {
+    if (f.ruleId !== "price_history") return false;
+    if (wholeInvoiceExplained) return true;
+    if (!coveredLines.size) return false;
+    const lines = lineIdsIn(f);
+    return lines.length ? lines.every((id) => coveredLines.has(id)) : itemLines.length === 1 && coveredLines.has(itemLines[0].id);
+  };
+  const drift = cusumChangePointFindings(invoice, ctx).filter((f) => !ctx.config.disabledRules.includes(f.ruleId));
+  const extra = [...forensic, ...drift].filter((f) => !alreadyCovered(f));
+  const findings = [...core, ...extra]
     .sort((a, b) => (a.classification === b.classification ? 0 : a.classification === "LIKELY_ERROR" ? -1 : 1) || SEV[a.severity] - SEV[b.severity]);
   return {
     invoiceId: invoice.id,

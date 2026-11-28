@@ -244,10 +244,12 @@ function ReviewForm({ e, onConfirm }: { e: ExtractedInvoice; onConfirm: (e: Extr
   const [v, setV] = useState({ vendorName: e.vendorName, number: e.number, date: e.date, dueDate: e.dueDate, currency: e.currency, total: e.total });
   const [checked, setChecked] = useState(e.lowConfidence.length === 0); // flagged fields must be explicitly reviewed
   const flagged = (k: FieldKey) => e.lowConfidence.includes(k);
-  const valid = Boolean(v.vendorName.trim() && v.number.trim() && parseISO(v.date) !== null && parseISO(v.dueDate) !== null && isCurrency(v.currency) && isValidDecimal(v.total) && !v.total.trim().startsWith("-") && checked);
+  // Credit notes are kept as positive amounts, but people write them as "-100", so the sign is accepted and dropped there.
+  const totalClean = e.isCredit ? v.total.trim().replace(/^[-\u2212]\s*/, "") : v.total.trim();
+  const valid = Boolean(v.vendorName.trim() && v.number.trim() && parseISO(v.date) !== null && parseISO(v.dueDate) !== null && isCurrency(v.currency) && isValidDecimal(totalClean) && !totalClean.startsWith("-") && checked);
   const set = (k: keyof typeof v) => (ev: React.ChangeEvent<HTMLInputElement>) => setV({ ...v, [k]: ev.target.value });
   return (
-    <form className="mt-3 rounded-md border border-warn-line bg-warn-bg/40 p-4" onSubmit={(ev) => { ev.preventDefault(); if (valid) onConfirm({ ...e, ...v, lowConfidence: [], confirmedFields: e.lowConfidence }); }}>
+    <form className="mt-3 rounded-md border border-warn-line bg-warn-bg/40 p-4" onSubmit={(ev) => { ev.preventDefault(); if (valid) onConfirm({ ...e, ...v, total: totalClean, lowConfidence: [], confirmedFields: e.lowConfidence }); }}>
       <p className="mb-3 flex items-start gap-2 text-sm text-warn"><AlertCircle className="mt-0.5 size-4 shrink-0" aria-hidden />Some invoice details couldn&apos;t be extracted confidently. Review the highlighted fields.</p>
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Vendor" htmlFor="rv-vendor" flagged={flagged("vendorName")}><input id="rv-vendor" className={fieldClass} value={v.vendorName} onChange={set("vendorName")} /></Field>
@@ -263,7 +265,7 @@ function ReviewForm({ e, onConfirm }: { e: ExtractedInvoice; onConfirm: (e: Extr
           <span>I checked the highlighted fields ({e.lowConfidence.map((k) => LABELS[k]).join(", ")}) and they match my invoice.</span>
         </label>
       )}
-      <div className="mt-3 flex justify-end"><Button type="button" variant="primary" disabled={!valid} onClick={() => valid && onConfirm({ ...e, ...v, total: v.total.trim(), lowConfidence: [], confirmedFields: e.lowConfidence })}>Confirm and run audit</Button></div>
+      <div className="mt-3 flex justify-end"><Button type="button" variant="primary" disabled={!valid} onClick={() => valid && onConfirm({ ...e, ...v, total: totalClean, lowConfidence: [], confirmedFields: e.lowConfidence })}>Confirm and run audit</Button></div>
     </form>
   );
 }

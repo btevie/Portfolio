@@ -44,7 +44,7 @@ export function recurringSignals(invoices: Invoice[], asOf: ISODate): RecurringS
     if (bills.length < 3) continue;
     const gaps = bills.slice(1).map((b, n) => daysBetween(parseISO(bills[n].date)!, parseISO(b.date)!));
     const regular = gaps.slice(0, -1);
-    if (regular.length < 2 || !regular.every((g) => g >= 20 && g <= 40)) continue;
+    if (regular.length < 1 || !regular.every((g) => g >= 20 && g <= 40)) continue;
     const sortedGaps = [...regular].sort((a, b) => a - b);
     const typical = sortedGaps[Math.floor(sortedGaps.length / 2)];
     const first = bills[0], last = bills[bills.length - 1], prev = bills[bills.length - 2];
@@ -63,7 +63,8 @@ export function recurringSignals(invoices: Invoice[], asOf: ISODate): RecurringS
 
     const nextDue = parseISO(last.date)! + typical * 86_400_000;
     const late = Math.floor((today - nextDue) / 86_400_000);
-    if (late > GRACE_DAYS) {
+    // A newest gap that is neither monthly nor a short double-bill gap means the pattern already broke: do not call the next bill "missing".
+    if (late > GRACE_DAYS && lastGap >= 20 && lastGap <= 40) {
       out.push({
         ...v, kind: "missing", weight: 1,
         headline: `No new bill, ${late} days past the usual date`,

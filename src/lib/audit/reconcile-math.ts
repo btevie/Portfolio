@@ -1,5 +1,5 @@
 import type { AuditFinding, Invoice, InvoiceLineItem } from "../types";
-import { D, formatMoney, str2 } from "./money";
+import { D, formatMoney } from "./money";
 import { makeFinding, taxFactor, withTax } from "./rules/util";
 
 export interface SubsetMatch {

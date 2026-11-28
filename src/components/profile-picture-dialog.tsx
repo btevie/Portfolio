@@ -25,19 +25,22 @@ export function ProfilePictureDialog({ open, onClose, name }: { open: boolean; o
   const file = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState<string | null | undefined>(undefined); // undefined = unchanged, null = removed
   const [error, setError] = useState("");
+  const op = useRef(0); // the current picture operation: a read that finishes after a close, a removal or a newer pick is ignored
   const shown = draft === undefined ? user.picture : draft ?? undefined;
   const changed = draft !== undefined && (draft ?? undefined) !== user.picture;
 
-  function close() { setDraft(undefined); setError(""); onClose(); }
+  function close() { op.current++; setDraft(undefined); setError(""); onClose(); }
 
   async function pick(f: File | undefined) {
     if (!f) return;
+    const mine = ++op.current; // a newer pick invalidates any read still pending, even if this one fails validation below
     if (!/^image\/(png|jpeg|webp)$/.test(f.type)) { setError("Choose a PNG, JPG or WebP image."); return; }
     if (f.size > MAX_FILE) { setError("That image is too large. Choose one under 8 MB."); return; }
     try {
-      if (!imageSizeOk(imageDimensions(new Uint8Array(await f.arrayBuffer())))) { setError("That image is too large in pixels. Choose a smaller one."); return; }
-      setDraft(await toSquare(f)); setError("");
-    } catch { setError("That image could not be read."); }
+      if (!imageSizeOk(imageDimensions(new Uint8Array(await f.arrayBuffer())))) { if (mine === op.current) setError("That image is too large in pixels. Choose a smaller one."); return; }
+      const square = await toSquare(f);
+      if (mine === op.current) { setDraft(square); setError(""); }
+    } catch { if (mine === op.current) setError("That image could not be read."); }
     if (file.current) file.current.value = "";
   }
 
@@ -52,7 +55,7 @@ export function ProfilePictureDialog({ open, onClose, name }: { open: boolean; o
         <div className="my-8 flex flex-col-reverse items-center gap-6 sm:my-10 sm:flex-row sm:justify-between">
           <div className="flex w-full flex-col gap-1 sm:w-auto">
             <button type="button" onClick={() => file.current?.click()} className="flex min-h-12 cursor-pointer items-center gap-3 rounded-md px-1 text-left text-base hover:bg-muted"><Upload className="size-5" aria-hidden />Upload picture</button>
-            <button type="button" disabled={!shown} onClick={() => setDraft(null)} className="flex min-h-12 cursor-pointer items-center gap-3 rounded-md px-1 text-left text-base hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"><Trash2 className="size-5" aria-hidden />Remove picture</button>
+            <button type="button" disabled={!shown} onClick={() => { op.current++; setDraft(null); }} className="flex min-h-12 cursor-pointer items-center gap-3 rounded-md px-1 text-left text-base hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"><Trash2 className="size-5" aria-hidden />Remove picture</button>
           </div>
           <Avatar name={name ?? user.name} email={user.email} picture={shown} size={176} className="sm:size-[200px]" />
         </div>

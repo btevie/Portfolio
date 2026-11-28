@@ -195,11 +195,19 @@ export const actions = {
       const demo = new Set(s.invoices.filter((i) => i.source === "demo").map((i) => i.id));
       const seedIds = new Set(seedRecovery.map((r) => r.id)); // saved data from before records were labelled
       const invoices = s.invoices.filter((i) => !demo.has(i.id));
-      const vendors = s.vendors.filter((v) => invoices.some((i) => i.vendorId === v.id));
+      const demoVendors = new Set(s.invoices.filter((i) => demo.has(i.id)).map((i) => i.vendorId));
+      // Only vendors that belonged to the sample set go, and only when nothing the person added still uses them.
+      // A sample vendor the person added their own contract rate to is theirs now, so it stays.
+      const seedRateIds = new Set(createSeedState().contractRates.map((r) => r.id));
+      const ownRate = (vendorId: string) => s.contractRates.some((r) => r.vendorId === vendorId && !seedRateIds.has(r.id));
+      const vendors = s.vendors.filter((v) => !demoVendors.has(v.id) || invoices.some((i) => i.vendorId === v.id) || ownRate(v.id));
       const kept = new Set(vendors.map((v) => v.id));
+      const stillUsed = (vendorId: string) => invoices.some((i) => i.vendorId === vendorId);
       const prefixes = [...demo].map((id) => `${id}:`);
       const decisions = Object.fromEntries(Object.entries(s.decisions).filter(([findingId]) => !prefixes.some((prefix) => findingId.startsWith(prefix))));
-      return pruneCredits({ ...s, invoices, vendors, contractRates: s.contractRates.filter((r) => kept.has(r.vendorId)), recovery: s.recovery.filter((r) => !(r.source === "demo" || seedIds.has(r.id) || (r.invoiceId && demo.has(r.invoiceId)))), decisions }, creditCtx());
+      return pruneCredits({ ...s, invoices, vendors, contractRates: s.contractRates.filter((r) => kept.has(r.vendorId) && (!seedRateIds.has(r.id) || stillUsed(r.vendorId))),
+        // Sample cases go. A case the person created stays, even if it pointed at a sample invoice: it just loses that link.
+        recovery: s.recovery.filter((r) => !(r.source === "demo" || seedIds.has(r.id))).map((r) => (r.invoiceId && demo.has(r.invoiceId) ? { ...r, invoiceId: undefined, findingId: undefined } : r)), decisions }, creditCtx());
     });
   },
   /** Clear the sample set but keep the profile and settings. */
@@ -215,7 +223,11 @@ export const actions = {
 /** True when there is anything in the browser the person created themselves, as opposed to the fictional sample set. */
 export function hasOwnData(s: AppState): boolean {
   const seedIds = new Set(seedRecovery.map((r) => r.id));
-  return s.invoices.some((i) => i.source !== "demo") || s.recovery.some((r) => r.source !== "demo" && !seedIds.has(r.id));
+  // A vendor or agreed rate you added counts too: loading the sample set replaces them even when you have no invoices yet.
+  const seed = createSeedState();
+  const seedVendors = new Set(seed.vendors.map((v) => v.id)), seedRates = new Set(seed.contractRates.map((r) => r.id));
+  return s.invoices.some((i) => i.source !== "demo") || s.recovery.some((r) => r.source !== "demo" && !seedIds.has(r.id))
+    || s.vendors.some((v) => !seedVendors.has(v.id)) || s.contractRates.some((r) => !seedRates.has(r.id));
 }
 
 /** Non-reactive read for event handlers. */

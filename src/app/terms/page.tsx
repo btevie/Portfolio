@@ -19,7 +19,7 @@ export default function Terms() {
       <Section title="Example data in this demo">
         <ul>
           <li>The sample vendors and invoices are fictional.</li>
-          <li>PDFs with a selectable text layer are read in your browser by pattern, so check the figures. Photos, scans and other PDFs get example data chosen by the file name, marked Simulated.</li>
+          <li>PDFs with a selectable text layer are read in your browser by pattern, so check the figures. Photos and scanned PDFs are read with on-device text recognition (OCR), which can misread a digit, so you confirm every field before the check runs. A file the reader cannot open at all gets example data chosen by its file name, marked Simulated and never counted in your totals.</li>
           <li>CSV files and pasted text are read for real.</li>
         </ul>
       </Section>
