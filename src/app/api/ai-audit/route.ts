@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { aiExtractInvoice } from "@/billAuditor";
-import { isMedicalText } from "@/lib/extraction/local-ai";
+import { isMedicalText } from "@/lib/extraction/medical-text";
 import { MAX_TEXT_CHARS } from "@/lib/extraction/types";
 
 /**

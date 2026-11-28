@@ -1,4 +1,4 @@
-import { looksMedical } from "../medical";
+import { isMedicalText } from "./medical-text";
 import { MAX_TEXT_CHARS, type ExtractedInvoice } from "./types";
 import { useSyncExternalStore } from "react";
 
@@ -10,12 +10,10 @@ import { useSyncExternalStore } from "react";
 const KEY = "overbill:local-ai";
 const listeners = new Set<() => void>();
 
+export { isMedicalText };
 export const isLocalAiOn = (): boolean => { try { return localStorage.getItem(KEY) === "1"; } catch { return false; } };
 export function setLocalAi(on: boolean) { try { localStorage.setItem(KEY, on ? "1" : "0"); } catch { /* storage blocked: stays off */ } listeners.forEach((l) => l()); }
 export const useLocalAi = (): boolean => useSyncExternalStore((cb) => { listeners.add(cb); return () => listeners.delete(cb); }, isLocalAiOn, () => false);
-
-/** True when this text looks like a health document. Those never go to the AI reader. */
-export const isMedicalText = (text: string): boolean => looksMedical("", [text]) || /\b(patient|diagnos\w*|cpt|icd-?10|explanation of benefits|eob|ziekenhuis|zorgverzekering|huisarts|tandarts)\b/i.test(text);
 
 export async function localAiStatus(): Promise<{ ok: boolean; message: string }> {
   try {

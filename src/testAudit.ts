@@ -1,5 +1,4 @@
-import "dotenv/config";
-import { auditBill } from "./billAuditor";
+import { aiExtractInvoice } from "./billAuditor";
 
 async function runTest() {
   const fakeMessyBill = `
@@ -12,7 +11,7 @@ async function runTest() {
   `;
 
   console.log("Auditing bill...");
-  const result = await auditBill(fakeMessyBill, "csv");
+  const result = await aiExtractInvoice(fakeMessyBill, "csv");
   console.log(JSON.stringify(result, null, 2));
 }
 

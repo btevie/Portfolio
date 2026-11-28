@@ -2,9 +2,6 @@ import OpenAI from "openai";
 import { zodResponseFormat } from "openai/helpers/zod";
 import { z } from "zod";
 import Papa from "papaparse";
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore
-import pdfParse from "pdf-parse";
 import type { ExtractedInvoice } from "./lib/extraction/types";
 
 const openai = new OpenAI({
@@ -40,7 +37,7 @@ const ExtractedInvoiceZodSchema = z.object({
     .describe("Forensic translation notes explaining hidden junk fees, duplicates, or Dutch WIK 14-day rule warnings"),
 });
 
-export async function extractBillText(input: string | Buffer, fileType: "text" | "csv" | "pdf"): Promise<string> {
+export async function extractBillText(input: string, fileType: "text" | "csv"): Promise<string> {
   if (fileType === "csv" && typeof input === "string") {
     const cleanedCsv = input
       .split("\n")
@@ -51,17 +48,12 @@ export async function extractBillText(input: string | Buffer, fileType: "text" |
     return JSON.stringify(parsed.data, null, 2);
   }
 
-  if (fileType === "pdf" && Buffer.isBuffer(input)) {
-    const data = await pdfParse(input);
-    return data.text;
-  }
-
   return String(input).trim();
 }
 
 export async function aiExtractInvoice(
-  input: string | Buffer,
-  fileType: "text" | "csv" | "pdf" = "text"
+  input: string,
+  fileType: "text" | "csv" = "text"
 ): Promise<ExtractedInvoice | null> {
   const cleanText = await extractBillText(input, fileType);
   const today = new Date().toISOString().slice(0, 10);
@@ -119,6 +111,6 @@ Your job:
     // A language model can invent or misread a figure, so every field is confirmed by the person before the audit runs.
     lowConfidence: ["vendorName", "number", "date", "dueDate", "total"],
     notes: ["Read by the local AI model on this computer (Ollama). It can misread figures, so check every field against the bill.", ...parsed.notes],
-    method: fileType === "csv" ? "csv" : fileType === "pdf" ? "pdf" : "text",
+    method: fileType === "csv" ? "csv" : "text",
   };
 }
