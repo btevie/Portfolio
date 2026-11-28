@@ -19,6 +19,7 @@ import { MEDICAL_CHECKLIST, MEDICAL_INTRO, MEDICAL_TITLE } from "@/lib/medical";
 import { ruleCoverage } from "@/lib/coverage";
 import type { AuditFinding, FindingDecision, Invoice } from "@/lib/types";
 import { DisputeKitEditor } from "@/components/dispute-kit";
+import { MedicalTracker } from "@/components/medical-tracker";
 import { buildDisputeKit } from "@/lib/dispute-kit";
 import { CreditTracker, LinkedCredits } from "@/components/credit-tracker";
 import { Button, Card, ClassBadge, Disclosure, EmptyState, LinkButton, Modal, MotionBlock, PageHeader, Reveal, Pill, SectionHeader, SeverityPill } from "@/components/ui";
@@ -47,10 +48,10 @@ export function InvoiceDetail({ id }: { id: string }) {
 
   return (
     <>
-      <p className="mb-1 text-sm"><Link href="/invoices" className="inline-flex min-h-11 items-center gap-1 rounded-full bg-card px-4 text-foreground ring-1 ring-border transition-transform active:scale-95 focus-visible:outline-2 focus-visible:outline-ring"><ChevronLeft className="-ml-1 size-4" aria-hidden />Invoices</Link></p>
+      <p className="-mt-2 mb-4 text-sm"><Link href="/invoices" className="inline-flex min-h-8 items-center gap-0.5 rounded-full bg-card pr-3 pl-2 text-xs text-foreground ring-1 ring-border transition-transform active:scale-95 focus-visible:outline-2 focus-visible:outline-ring"><ChevronLeft className="size-3.5" aria-hidden />Invoices</Link></p>
       <PageHeader
         title={<>{inv.vendorName}<span className="sr-only"> · </span><span className="mt-0.5 block text-base font-normal text-muted-foreground sm:ml-2 sm:inline sm:text-2xl">{inv.number}</span></>}
-        description={inv.isCredit ? "Credit note · money owed to you · not a bill to pay" : cls === "CLEAR" ? (audit.findings.length ? "All findings are resolved or dismissed." : "Everything looks consistent with the checks we ran. That is not a guarantee.") : "Start with the box below, then open each finding to see why it was flagged. These are possible problems, not confirmed errors, until you confirm them."}
+        description={inv.isCredit ? "Credit note · money owed to you · not a bill to pay" : cls === "CLEAR" ? (audit.findings.length ? "All findings are resolved or dismissed." : "Everything looks consistent with the checks we ran. That is not a guarantee.") : undefined}
         actions={<>
           <span className="max-sm:hidden">{inv.isCredit ? <Pill tone="info">Credit note</Pill> : isSimulated(inv) ? <Pill tone="bad">Simulated, not your bill</Pill> : <ClassBadge value={cls} />}</span>
           <Button variant="secondary" className="text-bad" onClick={() => setConfirmDelete(true)} aria-label="Delete invoice"><Trash2 className="size-4" aria-hidden /></Button>
@@ -58,24 +59,25 @@ export function InvoiceDetail({ id }: { id: string }) {
       />
 
       {!inv.isCredit && inv.medical && <MedicalNotice inv={inv} />}
+      {!inv.isCredit && inv.medical && !isSimulated(inv) && <MedicalTracker inv={inv} />}
       {!inv.isCredit && <SourceNotice inv={inv} />}
       {!inv.isCredit && !inv.medical && !isSimulated(inv) && <p className="-mt-2 mb-4 text-xs text-muted-foreground">Is this a medical bill? <button type="button" onClick={() => actions.setMedical(inv.id, true)} className="min-h-9 cursor-pointer font-medium text-foreground underline underline-offset-2">Mark it as medical</button> for extra checks.</p>}
       {inv.isCredit && <div role="status" className="mb-4 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-primary"><strong>Credit note.</strong> This records money owed to you. It is not a bill to pay and is not audited as an invoice.</div>}
       {inv.isCredit && <CreditTracker credit={inv} />}
       {!inv.isCredit && (<>
       <motion.section aria-label="Verdict" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
-        className={cn("relative mb-4 overflow-hidden rounded-2xl border-l-4 bg-card p-4 ring-1 ring-line sm:mb-6 sm:p-6", !simulated && open.length === 0 && cls === "CLEAR" ? "border-l-ok" : "border-l-warn")}>
-        <p className={cn("relative flex items-center gap-2 text-lg font-semibold", !simulated && open.length === 0 && cls === "CLEAR" ? "text-ok" : "text-warn")}>
-          {simulated ? <><TriangleAlert className="size-6 shrink-0" aria-hidden />Demo example: not an audit of your bill</> : open.length === 0 && cls === "CLEAR" ? <><CheckCircle2 className="size-6 shrink-0" aria-hidden />{inv.isCredit ? "Credit note" : inv.medical ? "Nothing flagged, but check the medical list above" : "Nothing flagged by our checks"}</> : <><TriangleAlert className="size-6 shrink-0" aria-hidden />{cls === "LIKELY_ERROR" ? "Hold payment until you've reviewed this" : "Check before you pay"}</>}
+        className={cn("relative mb-4 overflow-hidden rounded-xl bg-card p-3 ring-1 ring-line sm:mb-5 sm:p-4")}>
+        <p className={cn("relative flex items-center gap-2 text-sm font-semibold", !simulated && open.length === 0 && cls === "CLEAR" ? "text-ok" : "text-warn")}>
+          {simulated ? <><TriangleAlert className="size-4 shrink-0" aria-hidden />Demo example: not an audit of your bill</> : open.length === 0 && cls === "CLEAR" ? <><CheckCircle2 className="size-4 shrink-0" aria-hidden />{inv.isCredit ? "Credit note" : inv.medical ? "Nothing flagged, but check the medical list above" : "Nothing flagged by our checks"}</> : <><TriangleAlert className="size-4 shrink-0" aria-hidden />{cls === "LIKELY_ERROR" ? "Hold payment until you've reviewed this" : "Check before you pay"}</>}
         </p>
         {simulated ? (
           <p className="relative mt-2 text-sm text-muted-foreground">Overbill did not read your file, so there is no real result. The findings below only show what a check looks like on made-up figures. They are not counted in your totals, and you cannot dispute or track them.</p>
         ) : open.length > 0 ? (
-          <div className="relative mt-4 sm:mt-6">
-            <p className="text-sm text-muted-foreground">Possible overcharge on this invoice <span className="text-xs">(&ldquo;at stake&rdquo; = money you might get back if the findings are real)</span></p>
-            <p className="num mt-0.5 text-3xl font-semibold tracking-tight sm:text-4xl">{formatMoney(invoiceExposure(open, inv.total), inv.currency)}</p>
-            <p className="mt-1 text-sm text-muted-foreground">of {m(inv.total)} total · {open.length} open finding{open.length === 1 ? "" : "s"}, including tax. Not confirmed.</p>
-            <Button variant="primary" className="mt-4 w-full sm:w-auto" onClick={() => setNoteFor(open)}><MailPlus className="size-4" aria-hidden />Generate dispute note</Button>
+          <div className="relative mt-2">
+            <p className="text-xs text-muted-foreground">Possible overcharge, if the findings are real</p>
+            <p className="num text-xl font-semibold tracking-tight sm:text-2xl">{formatMoney(invoiceExposure(open, inv.total), inv.currency)}</p>
+            <p className="text-xs text-muted-foreground">of {m(inv.total)} total · {open.length} open finding{open.length === 1 ? "" : "s"}, incl. tax. Not confirmed.</p>
+            <Button variant="primary" className="mt-3 w-full sm:w-auto" onClick={() => setNoteFor(open)}><MailPlus className="size-4" aria-hidden />Generate dispute note</Button>
           </div>
         ) : (
           <p className="relative mt-2 text-sm text-muted-foreground">{inv.isCredit ? <>The vendor owes you {m(inv.total)}. Credit notes are tracked, not audited. Check that it is applied to a later invoice or refunded.</> : <>Our checks (totals, tax, duplicates, rates and history) found nothing unusual in {m(inv.total)}. That isn&apos;t a guarantee, so give it a quick look before you pay.</>}</p>
@@ -84,7 +86,7 @@ export function InvoiceDetail({ id }: { id: string }) {
       <section aria-labelledby="findings-h" className="mb-4">
         <h2 id="findings-h" className="mb-3 text-base font-semibold tracking-tight">What we found</h2>
         {audit.findings.length === 0 ? (
-          <Card><EmptyState icon={Check} title={inv.isCredit ? "Credit note not audited" : "No findings"}>{inv.isCredit ? "This credit note is recorded separately and is not run through bill checks." : "Everything looks consistent with the checks we ran. That is not proof the invoice is right; compare it with your contract or order if something feels off."}</EmptyState></Card>
+          <p className="flex items-start gap-2 rounded-xl bg-muted px-3 py-2 text-xs text-muted-foreground"><Check className="mt-0.5 size-3.5 shrink-0" aria-hidden /><span><strong className="font-semibold text-foreground">{inv.isCredit ? "Credit note not audited." : "No findings."}</strong> {inv.isCredit ? "It is recorded separately and not run through bill checks." : "That is not proof the invoice is right. Compare it with your contract or order if something feels off."}</span></p>
         ) : (
           <div className="space-y-3">{audit.findings.map((f, i) => <MotionBlock key={f.id} i={i}><FindingCard f={f} inv={inv} simulated={simulated} first={f.id === open[0]?.id} onNote={() => setNoteFor([f])} /></MotionBlock>)}</div>
         )}
@@ -155,7 +157,7 @@ export function InvoiceDetail({ id }: { id: string }) {
           )}
         </Card>
       </div>
-      <AiSecondOpinionCard invoice={inv} />
+      {inv.medical ? <p className="mt-6 rounded-2xl border border-line bg-card px-5 py-4 text-sm text-muted-foreground">AI second opinion is switched off for medical bills, so health information never leaves this device.</p> : <AiSecondOpinionCard invoice={inv} />}
       {lineCmp && (
         <Card className="mt-6">
           <SectionHeader title={`Line by line vs ${lineCmp.previous.number}`} description={`Previous invoice from ${lineCmp.previous.vendorName}, ${fmtDate(lineCmp.previous.date)}. Lines are paired only when the descriptions match exactly; a price change is something to ask about, not a confirmed error.`} />
@@ -289,6 +291,7 @@ function FindingCard({ f, inv, onNote, first, simulated }: { f: AuditFinding; in
           )}
           <div className="flex flex-wrap gap-2 border-t border-line pt-4 [&>*]:max-sm:min-h-11 [&>*]:max-sm:flex-1">
             {decision !== "confirmed" && <Button size="sm" onClick={() => decide("confirmed", "Marked as confirmed")}>I agree: confirm this is an error</Button>}
+            {(f.ruleId === "price_history" || f.ruleId === "unexpected_fee") && !state.settings.exceptions.some((e) => e.vendorId === inv.vendorId && e.ruleId === f.ruleId) && <Button size="sm" onClick={() => { actions.addVendorException(inv.vendorId, f.ruleId as "price_history" | "unexpected_fee", `Expected from invoice ${inv.number}`); }}>Expected: don&apos;t flag this for {inv.vendorName}</Button>}
             {decision !== "dismissed" ? <Button size="sm" onClick={() => setAsking(true)} aria-expanded={asking}>Dismiss: this is expected</Button> : <Button size="sm" onClick={() => actions.setDecision(f.id, "open")}>Reopen</Button>}
             <Button size="sm" onClick={onNote}><MailPlus className="size-3.5" aria-hidden />Draft note</Button>
             {record ? <LinkButton href={`/recovery?case=${encodeURIComponent(record.id)}`} size="sm">Open case: {STATUS_LABEL[record.status]}{(() => { const a = nextAction(record, today()); return a && a.overdueDays > 0 ? " · follow-up overdue" : ""; })()}</LinkButton>

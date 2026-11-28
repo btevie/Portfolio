@@ -63,6 +63,7 @@ export interface Invoice {
 }
 
 export type VendorCategory =
+  | "Medical"
   | "Infrastructure"
   | "Cloud usage"
   | "Telecom"
@@ -257,6 +258,29 @@ export interface CreditRecord {
   events: CreditEvent[];
 }
 
+/** A date the user entered (appeal window, payment plan, collection notice). `source` says where it came from; Overbill never infers one. */
+export interface MedicalDeadline { id: string; date: ISODate; label: string; source: string; addedOn: ISODate }
+
+/**
+ * Tracking for a medical bill. Everything here is something the user recorded themselves. "Checked" means the user says
+ * they looked at that document; it says nothing about whether the bill is correct.
+ */
+export interface MedicalBill {
+  /** Whose bill it is ("me", a family member's first name...). Kept short and never put into drafted requests unless the user adds it. */
+  forPerson?: string;
+  /** Date the user marked "I matched the insurer's statement (EOB) to this bill". */
+  statementCheckedOn?: ISODate;
+  /** Date the user marked "I received an itemised bill". */
+  itemisedReceivedOn?: ISODate;
+  /** What the insurer's statement says the patient is responsible for (decimal, the invoice's currency). */
+  patientResponsibility?: string;
+  /** Date of that statement, so a stale figure can be told from a fresh one. */
+  statementDate?: ISODate;
+  /** The user chose to pay without the checks above; recorded so the pay run does not nag. */
+  payAnywayOn?: ISODate;
+  deadlines: MedicalDeadline[];
+}
+
 export type Sensitivity = "relaxed" | "balanced" | "strict";
 export type DateFormat = "dmy" | "mdy" | "iso" | "long";
 
@@ -317,5 +341,7 @@ export interface AppState {
   decisions: Record<string, FindingDecision>;
   /** Why the user dismissed or confirmed a finding, keyed by finding id. Absent in data saved by older versions. */
   decisionReasons?: Record<string, string>;
+  /** Extra tracking for invoices the user marked as medical bills, keyed by invoice id. Absent in data saved by older versions. */
+  medicalBills?: Record<string, MedicalBill>;
   settings: UserSettings;
 }

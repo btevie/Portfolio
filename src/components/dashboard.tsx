@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { MESSY_EXAMPLES } from "@/lib/extraction/parsers";
 import { useMemo, useSyncExternalStore } from "react";
 import { GET_STARTED_EVENT, getStartedVisible, hideGetStarted } from "@/lib/get-started";
 import { ArrowRight, Check, Download, HeartPulse, CheckCircle2, Circle, Inbox, Upload, X } from "lucide-react";
@@ -46,7 +47,7 @@ const URGENCY = {
 
 function whenText(a: NextAction) {
   if (a.days === null) return "No due date";
-  if (a.kind === "followup") return a.dated ? `Follow-up ${a.days} day${a.days === 1 ? "" : "s"} overdue` : `Quiet for ${a.days} days`;
+  if (a.kind === "followup") return a.dated ? (a.days! < 0 ? `Date in ${-a.days!} day${a.days === -1 ? "" : "s"}` : a.days === 0 ? "Date is today" : `Follow-up ${a.days} day${a.days === 1 ? "" : "s"} overdue`) : `Quiet for ${a.days} days`;
   if (a.urgency === "paid") return "Paid";
   return a.days < 0 ? `${-a.days} day${a.days === -1 ? "" : "s"} overdue` : a.days === 0 ? "Due today" : `Due in ${a.days} day${a.days === 1 ? "" : "s"}`;
 }
@@ -148,6 +149,12 @@ export function Dashboard() {
         <Card><EmptyState icon={Inbox} title="Your invoice history starts here" action={<div className="flex flex-wrap justify-center gap-2"><LinkButton href="/invoices/new" variant="primary"><Upload className="size-4" />Upload your first invoice</LinkButton><LinkButton href="/demo">Try sample data</LinkButton></div>}>
           Upload your first bill to establish a baseline and catch unexpected charges.
         </EmptyState></Card>
+        <section aria-label="Try a messy example" className="mt-4">
+          <h2 className="mb-2 text-sm font-semibold">Or see it work on something messy</h2>
+          <ul className="grid gap-2 sm:grid-cols-3">
+            {MESSY_EXAMPLES.map((x, i) => <li key={x.label}><Link href={`/invoices/new?example=${i}`} className="flex min-h-14 items-center rounded-2xl bg-card px-4 py-3 text-sm font-medium ring-1 ring-border transition-transform active:scale-[0.98] hover:bg-muted">{x.label}</Link></li>)}
+          </ul>
+        </section>
       </>
     );
   }

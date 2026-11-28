@@ -1,4 +1,6 @@
 import { caseFigures, nextAction as caseNextAction } from "../recovery";
+import { deadlineState, deadlineWhen, emptyMedical, missingShort, needsChecks } from "../medical-tracking";
+import { fmtDate } from "../format";
 import { isSimulated } from "../evidence";
 import { auditInvoice, configFromSettings, RULES } from "../audit/engine";
 import { D, Decimal, pct, sum } from "../audit/money";
@@ -26,11 +28,13 @@ export function auditAll(state: AppState): Audits {
   const config = configFromSettings(state.settings);
   const asOf = today();
   const out: Audits = {};
+  // "Expected, remember this": a vendor-level exception switches that one check off for that vendor until it expires or is removed.
+  const excepted = state.settings.exceptions.filter((e) => !e.expiresOn || e.expiresOn >= asOf);
   const bills = state.invoices.filter((i) => !i.isCredit && !isSimulated(i)); // credit notes are tracked, not audited, and are not price history; simulated invoices are invented, so they are never evidence about real ones
   for (const inv of state.invoices) {
     out[inv.id] = auditInvoice(inv, {
       today: asOf, invoices: bills, contractRates: state.contractRates,
-      vendor: state.vendors.find((v) => v.id === inv.vendorId), config: inv.isCredit ? { ...config, disabledRules: RULES.map((r) => r.id) } : config,
+      vendor: state.vendors.find((v) => v.id === inv.vendorId), config: inv.isCredit ? { ...config, disabledRules: RULES.map((r) => r.id) } : excepted.length ? { ...config, disabledRules: [...new Set([...config.disabledRules, ...excepted.filter((e) => e.vendorId === inv.vendorId).map((e) => e.ruleId)])] } : config,
     });
   }
   return out;
@@ -339,6 +343,24 @@ export function nextActions(state: AppState, audits: Audits, now = Date.now()): 
       href: `/invoices/${inv.id}?finding=${encodeURIComponent(top.id)}`,
       cta: urgency === "paid" ? "Review and ask for a refund" : "Review before paying",
     });
+  }
+  // Medical bills: one entry for a bill still waiting on the person's checks (unless a finding already put it in the list), and dates they entered.
+  for (const inv of state.invoices) {
+    if (!inv.medical || inv.isCredit || isSimulated(inv)) continue;
+    const med = state.medicalBills?.[inv.id] ?? emptyMedical();
+    const dueMs = parseISO(inv.dueDate);
+    const days = dueMs === null ? null : Math.round((dueMs - todayMs) / DAY);
+    if (inv.paymentStatus !== "paid" && needsChecks(med) && !out.some((a) => a.id === `inv:${inv.id}`)) {
+      const status = paymentStatusAt(inv);
+      out.push({ id: `inv:${inv.id}`, kind: "invoice", urgency: status === "overdue" || (days !== null && days < 0) ? "overdue" : days !== null && days <= soonDays ? "soon" : "later", severity: "medium", vendorName: inv.vendorName,
+        reason: `Medical bill waiting on you: ${missingShort(med).join(" and ")}`, amount: null, days, findings: 0, href: `/invoices/${inv.id}`, cta: "Check this bill" });
+    }
+    for (const d of med.deadlines) {
+      const st = deadlineState(d, today(), soonDays);
+      if (st.status === "later") continue;
+      out.push({ id: `med:${inv.id}:${d.id}`, kind: "followup", urgency: st.status === "overdue" ? "overdue" : "soon", severity: "high", vendorName: inv.vendorName,
+        reason: `${d.label} (${fmtDate(d.date)}, ${deadlineWhen(st.days)}). Source you gave: ${d.source}`, amount: null, days: -st.days, dated: true, findings: 0, href: `/invoices/${inv.id}`, cta: "Open the bill" });
+    }
   }
   const replyAfter = state.settings.reminders.replyAfterDays;
   for (const c of state.recovery) {

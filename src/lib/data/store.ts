@@ -1,9 +1,10 @@
 "use client";
 import { useSyncExternalStore } from "react";
 import type {
-  AppState, ContractRate, FindingDecision, Invoice, RecoveryRecord, RecoveryStatus, UserSettings, Vendor,
+  AppState, ContractRate, ExceptionRuleId, FindingDecision, Invoice, MedicalBill, RecoveryRecord, RecoveryStatus, UserSettings, Vendor,
 } from "../types";
 import { newId } from "../ids";
+import { emptyMedical, validateDeadline, validateMedicalPatch, type DeadlineInput } from "../medical-tracking";
 import { celebrate } from "../celebrate";
 import { formatMoney } from "../audit/money";
 import { applyEvent, caseFigures, MAX_EVENTS, validateEvent, type EventInput } from "../recovery";
@@ -64,6 +65,12 @@ function creditAction(fn: (s: AppState) => CreditResult): { ok: true } | { ok: f
   commit(r.state);
   return { ok: true };
 }
+/** Run a change the person may regret and offer a short "Undo" toast. Undo puts back the exact state from before the change. */
+function withUndo(label: string, fn: () => void) {
+  const before = current();
+  fn();
+  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("overbill:undo", { detail: { label, restore: () => commit(before) } }));
+}
 const uid = (p: string) => `${p}-${newId().slice(0, 8)}`;
 
 if (typeof window !== "undefined") {
@@ -96,7 +103,23 @@ export const actions = {
     update((s) => {
       const decisions = Object.fromEntries(Object.entries(s.decisions).filter(([findingId]) => !findingId.startsWith(`${id}:`)));
       const recovery = s.recovery.map((r) => r.invoiceId === id ? { ...r, invoiceId: undefined, findingId: undefined } : r);
-      return pruneCredits({ ...s, invoices: s.invoices.filter((i) => i.id !== id), decisions, recovery }, creditCtx());
+      const { [id]: _gone, ...medicalBills } = s.medicalBills ?? {}; void _gone;
+      return pruneCredits({ ...s, invoices: s.invoices.filter((i) => i.id !== id), decisions, recovery, medicalBills }, creditCtx());
+    });
+  },
+  /** Folds one vendor into another after the person confirms they are the same company. Invoices, cases, contract rates and exceptions move across; nothing is deleted except the duplicate vendor record. */
+  mergeVendors(keepId: string, dropId: string) {
+    update((s) => {
+      const keep = s.vendors.find((v) => v.id === keepId), drop = s.vendors.find((v) => v.id === dropId);
+      if (!keep || !drop || keepId === dropId) return s;
+      return {
+        ...s,
+        vendors: s.vendors.filter((v) => v.id !== dropId),
+        invoices: s.invoices.map((i) => (i.vendorId === dropId ? { ...i, vendorId: keepId, vendorName: keep.name } : i)),
+        recovery: s.recovery.map((r) => (r.vendorId === dropId ? { ...r, vendorId: keepId, vendorName: keep.name } : r)),
+        contractRates: s.contractRates.map((c) => (c.vendorId === dropId ? { ...c, vendorId: keepId } : c)),
+        settings: { ...s.settings, exceptions: s.settings.exceptions.map((e) => (e.vendorId === dropId ? { ...e, vendorId: keepId } : e)) },
+      };
     });
   },
   /** The person's own call on whether a bill is medical. Medical bills get extra checks and are never marked clear to pay automatically. */
@@ -105,9 +128,36 @@ export const actions = {
   },
   /** The user's own record of whether they paid. "overdue" is derived from the due date, never stored by hand. */
   setPaymentStatus(id: string, paymentStatus: "paid" | "unpaid") {
-    update((s) => ({ ...s, invoices: s.invoices.map((i) => (i.id === id ? { ...i, paymentStatus } : i)) }));
+    withUndo(paymentStatus === "paid" ? "Marked paid" : "Marked unpaid", () => update((s) => ({ ...s, invoices: s.invoices.map((i) => (i.id === id ? { ...i, paymentStatus } : i)) })));
   },
   /** `reason` is the user's own note for dismissing or confirming; it is kept with the decision and cleared when the finding is reopened. */
+  /** Medical-bill tracking the person records: checks, the insurer statement figure, deadlines. Returns an error message, or null when saved. */
+  updateMedical(invoiceId: string, patch: Partial<Omit<MedicalBill, "deadlines">>): string | null {
+    const error = validateMedicalPatch(patch, today());
+    if (error) return error;
+    update((s) => {
+      const before = s.medicalBills?.[invoiceId] ?? emptyMedical();
+      const next: MedicalBill = { ...before, ...patch };
+      for (const k of Object.keys(next) as (keyof MedicalBill)[]) if (next[k] === "" || next[k] === undefined) delete next[k]; // an empty field means "cleared"
+      return { ...s, medicalBills: { ...s.medicalBills, [invoiceId]: { ...next, deadlines: next.deadlines ?? [] } } };
+    });
+    return null;
+  },
+  addMedicalDeadline(invoiceId: string, input: DeadlineInput): string | null {
+    const error = validateDeadline(input);
+    if (error) return error;
+    const before = current().medicalBills?.[invoiceId] ?? emptyMedical();
+    if (before.deadlines.length >= 50) return "That is a lot of dates for one bill. Remove one you no longer need first.";
+    const d = { id: `dl-${newId().slice(0, 10)}`, date: input.date, label: input.label.trim(), source: input.source.trim(), addedOn: today() };
+    update((s) => ({ ...s, medicalBills: { ...s.medicalBills, [invoiceId]: { ...before, deadlines: [...before.deadlines, d] } } }));
+    return null;
+  },
+  removeMedicalDeadline(invoiceId: string, deadlineId: string) {
+    update((s) => {
+      const before = s.medicalBills?.[invoiceId];
+      return before ? { ...s, medicalBills: { ...s.medicalBills, [invoiceId]: { ...before, deadlines: before.deadlines.filter((d) => d.id !== deadlineId) } } } : s;
+    });
+  },
   setDecision(findingId: string, decision: FindingDecision, reason?: string) {
     update((s) => {
       const { [findingId]: _old, ...others } = s.decisionReasons ?? {}; void _old;
@@ -117,7 +167,7 @@ export const actions = {
     });
   },
   setInvoicePaymentStatus(id: string, paymentStatus: "paid" | "unpaid") {
-    update((s) => ({ ...s, invoices: s.invoices.map((i) => i.id === id ? { ...i, paymentStatus } : i) }));
+    withUndo(paymentStatus === "paid" ? "Marked paid" : "Marked unpaid", () => update((s) => ({ ...s, invoices: s.invoices.map((i) => i.id === id ? { ...i, paymentStatus } : i) })));
   },
   addRecovery(r: Omit<RecoveryRecord, "id" | "createdAt" | "updatedAt" | "status"> & { status?: RecoveryStatus }) {
     if (r.findingId) {
@@ -175,6 +225,16 @@ export const actions = {
   removeContractRate(id: string) {
     update((s) => ({ ...s, contractRates: s.contractRates.filter((r) => r.id !== id) }));
   },
+  /** "Expected, remember this": stop one check from flagging one vendor. Undoable, and removable from Settings. */
+  addVendorException(vendorId: string, ruleId: ExceptionRuleId, reason: string) {
+    if (current().settings.exceptions.some((e) => e.vendorId === vendorId && e.ruleId === ruleId)) return;
+    withUndo("Got it. We won't flag this for this vendor again", () => update((s) => ({
+      ...s, settings: { ...s.settings, exceptions: [...s.settings.exceptions, { id: uid("ex"), vendorId, ruleId, reason: reason.trim().slice(0, 200), createdAt: today() }] },
+    })));
+  },
+  removeVendorException(id: string) {
+    update((s) => ({ ...s, settings: { ...s.settings, exceptions: s.settings.exceptions.filter((e) => e.id !== id) } }));
+  },
   updateSettings(patch: Partial<UserSettings>) {
     update((s) => ({ ...s, settings: { ...s.settings, ...patch } }));
   },
@@ -216,11 +276,11 @@ export const actions = {
   },
   /** Clear the sample set but keep the profile and settings. */
   startEmpty() {
-    update((s) => ({ ...s, vendors: [], invoices: [], contractRates: [], recovery: [], credits: [], decisions: {}, decisionReasons: {} }));
+    update((s) => ({ ...s, vendors: [], invoices: [], contractRates: [], recovery: [], credits: [], decisions: {}, decisionReasons: {}, medicalBills: {} }));
   },
   /** Remove every invoice, vendor and record, and blank the profile. Preferences (currency, sensitivity, toggles) are kept. */
   clearAll() {
-    update((s) => ({ ...s, user: { id: s.user.id, name: "", email: "", company: "" }, vendors: [], invoices: [], contractRates: [], recovery: [], credits: [], decisions: {}, decisionReasons: {} }));
+    update((s) => ({ ...s, user: { id: s.user.id, name: "", email: "", company: "" }, vendors: [], invoices: [], contractRates: [], recovery: [], credits: [], decisions: {}, decisionReasons: {}, medicalBills: {} }));
   },
 };
 

@@ -1,6 +1,6 @@
 import type { Invoice } from "./types";
 
-const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/;/g, "\;").replace(/,/g, "\\,").replace(/\r?\n/g, "\\n");
+const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r?\n/g, "\\n");
 const day = (iso: string) => iso.replace(/-/g, "");
 /** RFC 5545 asks for lines of at most 75 octets; fold longer ones. */
 const fold = (line: string) => (line.length <= 73 ? line : line.match(/.{1,73}/g)!.join("\r\n "));
@@ -30,4 +30,19 @@ export function dueDatesCalendar(invoices: Invoice[], flagged: Set<string>, stam
       ];
     });
   return ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Overbill//Due dates//EN", "CALSCALE:GREGORIAN", ...events, "END:VCALENDAR"].join("\r\n") + "\r\n";
+}
+
+export interface CalendarDeadline { id: string; date: string; label: string; source: string; title: string }
+
+/** An .ics file of dates the person entered (appeal windows, payment plans, notices), each with where it came from. */
+export function deadlinesCalendar(items: CalendarDeadline[], stamp = new Date()): string {
+  const dtstamp = stamp.toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
+  const events = items.filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d.date)).flatMap((d) => [
+    "BEGIN:VEVENT", `UID:${d.id}@overbill.local`, `DTSTAMP:${dtstamp}`, `DTSTART;VALUE=DATE:${day(d.date)}`,
+    `DTEND;VALUE=DATE:${day(new Date(Date.parse(d.date) + 86_400_000).toISOString().slice(0, 10))}`,
+    fold(`SUMMARY:${esc(`${d.label}: ${d.title}`)}`),
+    fold(`DESCRIPTION:${esc(`Source you gave: ${d.source}. Entered by you in Overbill; check it against the original letter.`)}`),
+    "BEGIN:VALARM", "ACTION:DISPLAY", "TRIGGER:-P3D", "DESCRIPTION:Date coming up", "END:VALARM", "END:VEVENT",
+  ]);
+  return ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Overbill//Deadlines//EN", "CALSCALE:GREGORIAN", ...events, "END:VCALENDAR"].join("\r\n") + "\r\n";
 }

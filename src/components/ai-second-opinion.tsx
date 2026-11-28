@@ -24,6 +24,7 @@ export function AiSecondOpinionCard({ invoice }: { invoice: Invoice }) {
   const [findings, setFindings] = useState<AiFinding[] | null>(null);
 
   async function runAiReview() {
+    if (invoice.medical) { setError("Medical bills are never sent to an AI endpoint, to keep health information on this device."); return; } // enforced here as well as in the UI
     setLoading(true);
     setError(null);
     setFindings(null);

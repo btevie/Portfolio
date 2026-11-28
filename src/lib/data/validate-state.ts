@@ -2,7 +2,7 @@ import { isCurrency } from "../currencies";
 import { MAX_CREDIT_EVENTS } from "../credits";
 import { isValidDecimal, MAX_INT_DIGITS } from "../audit/money";
 import { parseISO } from "../audit/normalize";
-import type { AppState, ContractRate, CreditEvent, CreditRecord, FindingDecision, Invoice, InvoiceLineItem, RecoveryRecord, UserSettings, Vendor } from "../types";
+import type { AppState, ContractRate, CreditEvent, CreditRecord, FindingDecision, Invoice, InvoiceLineItem, MedicalBill, RecoveryRecord, UserSettings, Vendor } from "../types";
 import { createSeedState } from "./seed";
 
 /**
@@ -205,6 +205,21 @@ export function parseStoredState(raw: string): { state: AppState; dropped: numbe
   if (isObj(x.decisionReasons)) {
     for (const [k, v] of Object.entries(x.decisionReasons)) { if (k !== "__proto__" && k in decisions && typeof v === "string" && v.length > 0 && v.length <= 500) decisionReasons[k] = v; else dropped++; }
   }
+  // Medical-bill tracking is optional (older saves have none). Keep only entries for bills that exist, with every field checked.
+  const medicalBills: Record<string, MedicalBill> = {};
+  if (isObj(x.medicalBills)) {
+    const ids = new Set(inv.items.map((i) => i.id));
+    for (const [k, v] of Object.entries(x.medicalBills)) {
+      if (!ids.has(k)) continue; // its bill was deleted: nothing to keep, and not an error
+      const ok = k !== "__proto__" && isObj(v)
+        && [v.statementCheckedOn, v.itemisedReceivedOn, v.statementDate, v.payAnywayOn].every((d) => d === undefined || (str(d, 12) && parseISO(d) !== null))
+        && (v.patientResponsibility === undefined || (str(v.patientResponsibility, 24) && isValidDecimal(v.patientResponsibility) && !v.patientResponsibility.startsWith("-")))
+        && (v.forPerson === undefined || str(v.forPerson, 60))
+        && Array.isArray(v.deadlines) && v.deadlines.length <= 50
+        && v.deadlines.every((d: unknown) => isObj(d) && recordId(d.id) && str(d.date, 12) && parseISO(d.date) !== null && str(d.label, 120) && str(d.source, 200) && str(d.addedOn, 12) && parseISO(d.addedOn) !== null);
+      if (ok) medicalBills[k] = v as unknown as MedicalBill; else dropped++;
+    }
+  }
   const user = isObj(x.user) && str(x.user.id) && str(x.user.name, 200) && str(x.user.email, 320) && str(x.user.company, 200)
     ? { id: x.user.id, name: x.user.name, email: x.user.email, company: x.user.company, ...(typeof x.user.picture === "string" && validPicture(x.user.picture) ? { picture: x.user.picture } : {}) } : seed.user;
   // Settings saved by older versions lack the newer fields; fill them from defaults before validating.
@@ -213,7 +228,7 @@ export function parseStoredState(raw: string): { state: AppState; dropped: numbe
     ? { ...x.settings, privacy: { keepUploadedFiles: false as const, analytics: x.settings.privacy.analytics } } : seed.settings;
   if (!settings(x.settings)) dropped++;
 
-  return { state: { version: 1, user, vendors: vendorItems, invoices: inv.items, contractRates: rt.items, recovery: recoveryItems, credits: creditItems, decisions, ...(Object.keys(decisionReasons).length ? { decisionReasons } : {}), settings: s }, dropped };
+  return { state: { version: 1, user, vendors: vendorItems, invoices: inv.items, contractRates: rt.items, recovery: recoveryItems, credits: creditItems, decisions, ...(Object.keys(decisionReasons).length ? { decisionReasons } : {}), ...(Object.keys(medicalBills).length ? { medicalBills } : {}), settings: s }, dropped };
 }
 
 export const LIMITS = { MAX_LINES, MAX_INT_DIGITS };

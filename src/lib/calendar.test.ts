@@ -18,6 +18,7 @@ describe("dueDatesCalendar", () => {
   });
   it("escapes commas and semicolons", () => {
     const ev = dueDatesCalendar([{ ...invoices[0], vendorName: "A, B; C", paymentStatus: "unpaid" }], new Set());
-    expect(ev).toContain("A\\, B\; C");
+    const BS = String.fromCharCode(92); // RFC 5545: a comma and a semicolon in text are each escaped with a backslash
+    expect(ev).toContain(`A${BS}, B${BS}; C`);
   });
 });
