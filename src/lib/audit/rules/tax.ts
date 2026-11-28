@@ -1,4 +1,5 @@
 import type { AuditFinding } from "../../types";
+import { scaled } from "../currency-scale";
 import { priorInvoices } from "../history";
 import { D, formatMoney, str2, sum } from "../money";
 import type { Rule } from "../types";
@@ -47,7 +48,7 @@ export const taxRule: Rule = (inv, ctx) => {
   if (diff.abs().gt(tol)) {
     out.push(makeFinding(inv, {
       ruleId: "tax", key: "amount",
-      classification: "LIKELY_ERROR", severity: diff.abs().gte(20) ? "high" : "medium",
+      classification: "LIKELY_ERROR", severity: diff.abs().gte(scaled(20, inv.currency)) ? "high" : "medium",
       title: "Tax amount doesn't match the stated rate",
       explanation: `Applying the stated tax rate${groups.size > 1 ? "s" : ""} to the taxable amount gives ${m(expected)}, but the invoice charges ${m(inv.taxAmount)}.`,
       expected: m(expected), actual: m(inv.taxAmount), difference: formatMoney(diff, inv.currency),
@@ -75,7 +76,7 @@ export const taxRule: Rule = (inv, ctx) => {
       ruleId: "tax",
       key: `nl-vat9-${line.id}`,
       classification: "REVIEW_NEEDED",
-      severity: overcharge.gte(15) ? "medium" : "low",
+      severity: overcharge.gte(scaled(15, inv.currency)) ? "medium" : "low",
       title: `21% VAT charged on likely 9% Dutch reduced-rate item: "${line.description}"`,
       explanation: `This line is taxed at 21% (${m(billedTax)}), but food, non-alcoholic catering, books, passenger transport, and basic repairs generally qualify for the 9% Dutch BTW rate (${m(reducedTax)}).`,
       expected: `9% (${m(reducedTax)})`,
@@ -100,7 +101,7 @@ export const taxRule: Rule = (inv, ctx) => {
       ruleId: "tax",
       key: "reverse-charge-taxed",
       classification: "LIKELY_ERROR",
-      severity: D(inv.taxAmount).gte(20) ? "high" : "medium",
+      severity: D(inv.taxAmount).gte(scaled(20, inv.currency)) ? "high" : "medium",
       title: "Tax charged on an invoice marked reverse-charge (BTW verlegd)",
       explanation: `An invoice line references reverse-charge (BTW verlegd), yet ${m(inv.taxAmount)} in tax was charged.`,
       expected: m("0"),
@@ -118,7 +119,7 @@ export const taxRule: Rule = (inv, ctx) => {
       ruleId: "tax",
       key: "eu-b2b-reverse-charge",
       classification: "REVIEW_NEEDED",
-      severity: D(inv.taxAmount).gte(25) ? "medium" : "low",
+      severity: D(inv.taxAmount).gte(scaled(25, inv.currency)) ? "medium" : "low",
       title: `VAT charged by cross-border supplier ${inv.vendorName} (check EU B2B BTW verlegd)`,
       explanation: `${inv.vendorName} charged ${m(inv.taxAmount)} in VAT. For Dutch VAT-registered businesses (B2B), cross-border EU/international SaaS invoices should normally be billed at 0% reverse-charge (BTW verlegd)—VAT charged in error cannot be reclaimed on a Dutch BTW return.`,
       expected: `0% BTW verlegd (${m("0")})`,

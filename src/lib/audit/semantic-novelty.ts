@@ -1,4 +1,5 @@
 import type { AuditFinding, Invoice } from "../types";
+import { scaled } from "./currency-scale";
 import { priorInvoices } from "./history";
 import { D, formatMoney } from "./money";
 import { normalizeDescription } from "./normalize";
@@ -72,7 +73,7 @@ export function semanticNoveltyFindings(inv: Invoice, ctx: AuditContext): AuditF
 
   for (const line of inv.lineItems) {
     const amt = D(line.total);
-    if (amt.lt(10)) continue; // ignore trivial amounts under 10.00
+    if (amt.lt(scaled(10, inv.currency))) continue; // ignore trivial amounts under 10.00
     const feats = extractFeatures(line.description);
     if (feats.length < 4) continue;
 
@@ -91,7 +92,7 @@ export function semanticNoveltyFindings(inv: Invoice, ctx: AuditContext): AuditF
           ruleId: "unexpected_fee",
           key: `tfidf-novel-${line.id}`,
           classification: "REVIEW_NEEDED",
-          severity: amt.gte(75) ? "medium" : "low",
+          severity: amt.gte(scaled(75, inv.currency)) ? "medium" : "low",
           title: `Unfamiliar charge label (${noveltyPct}% lexical novelty vs ${inv.vendorName}'s history)`,
           explanation: `"${line.description}" (${m(line.total)}) shares almost no word or character-trigram overlap (${Math.round(maxSim * 100)}% cosine similarity) with any of the ${docs.length} line items ${inv.vendorName} has billed previously.`,
           expected: `Known service/product vocabulary from ${inv.vendorName}`,

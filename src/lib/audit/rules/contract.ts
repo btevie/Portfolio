@@ -1,4 +1,5 @@
 import type { AuditFinding } from "../../types";
+import { scaled } from "../currency-scale";
 import { D, formatMoney, str2 } from "../money";
 import { normalizeDescription } from "../normalize";
 import type { Rule } from "../types";
@@ -20,7 +21,7 @@ export const contractRateRule: Rule = (inv, ctx) => {
     const m = (v: string) => formatMoney(v, inv.currency);
     out.push(makeFinding(inv, {
       ruleId: "contract_rate", key: `rate-${rate.id}-${line.id}`,
-      classification: "LIKELY_ERROR", severity: overall.gte(100) ? "high" : "medium",
+      classification: "LIKELY_ERROR", severity: overall.gte(scaled(100, inv.currency)) ? "high" : "medium",
       title: `Billed above your agreed rate: "${line.description}"`,
       explanation: `You recorded an agreed rate of ${m(rate.unitPrice)} per ${rate.unit}. This line bills ${m(line.unitPrice)} per ${rate.unit} for ${line.quantity} ${rate.unit}(s).`,
       expected: `${m(rate.unitPrice)} / ${rate.unit}`, actual: `${m(line.unitPrice)} / ${rate.unit}`, difference: formatMoney(over, inv.currency, { signed: true }) + ` / ${rate.unit}`,

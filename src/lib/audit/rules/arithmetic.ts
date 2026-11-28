@@ -1,4 +1,5 @@
 import type { AuditFinding } from "../../types";
+import { scaled } from "../currency-scale";
 import type { Invoice } from "../../types";
 import { D, Decimal, formatMoney, round2, str2, sum } from "../money";
 import type { Rule } from "../types";
@@ -20,7 +21,7 @@ export const arithmeticRule: Rule = (inv, ctx) => {
         ruleId: "arithmetic",
         key: `line-${line.id}`,
         classification: "LIKELY_ERROR",
-        severity: diff.abs().gte(50) ? "high" : "medium",
+        severity: diff.abs().gte(scaled(50, inv.currency)) ? "high" : "medium",
         title: `Line total doesn't match quantity × price: "${line.description}"`,
         explanation: `${line.quantity} × ${m(line.unitPrice, inv)} should come to ${m(expected, inv)}, but the line shows ${m(line.total, inv)}. ${over ? "The line is higher than its own inputs support." : "The line is lower than its own inputs support."}`,
         expected: m(expected, inv),

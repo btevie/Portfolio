@@ -1,4 +1,5 @@
 import type { AuditFinding, Invoice } from "../types";
+import { scaled } from "./currency-scale";
 import { priorInvoices } from "./history";
 import { D, formatMoney, str2 } from "./money";
 import { normalizeDescription } from "./normalize";
@@ -62,14 +63,14 @@ export function unitDecompositionFindings(inv: Invoice, ctx: AuditContext): Audi
 
     const priceVariance = qty.times(effUnit.minus(oldUnit));
     const volumeVariance = qty.minus(oldQty).times(oldUnit);
-    if (priceVariance.lt(5)) continue;
+    if (priceVariance.lt(scaled(5, inv.currency))) continue;
 
     out.push(
       makeFinding(inv, {
         ruleId: "price_history",
         key: `pvm-tukey-${line.id}`,
         classification: "REVIEW_NEEDED",
-        severity: priceVariance.gte(50) ? "medium" : "low",
+        severity: priceVariance.gte(scaled(50, inv.currency)) ? "medium" : "low",
         title: `Hidden unit-rate hike (+${m(str2(priceVariance))}) masked by quantity change on "${line.description}"`,
         explanation: `Quantity changed from ${oldQty.toString()} to ${qty.toString()}, while the effective unit rate rose from ${m(str2(oldUnit))} to ${m(str2(effUnit))}. Decomposing the total change shows ${formatMoney(str2(volumeVariance), inv.currency, { signed: true })} from volume change and +${m(str2(priceVariance))} from an unannounced unit-rate increase.`,
         expected: `${m(str2(oldUnit))} / unit (Tukey upper fence: ${m(str2(D(upperFence.toFixed(2))))})`,

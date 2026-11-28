@@ -1,4 +1,5 @@
 import type { AuditFinding, Invoice } from "../types";
+import { scaled } from "./currency-scale";
 import { D, formatMoney, str2 } from "./money";
 import { daysBetween, parseISO } from "./normalize";
 import { makeFinding } from "./rules/util";
@@ -49,13 +50,13 @@ export function paymentArbitrageFindings(inv: Invoice): AuditFinding[] {
     const impliedApr = (d / (1 - d)) * (365 / windowSpread) * 100;
     const savings = total.times(D(d.toFixed(4)));
 
-    if (savings.gte(5) && impliedApr >= 8) {
+    if (savings.gte(scaled(5, inv.currency)) && impliedApr >= 8) {
       out.push(
         makeFinding(inv, {
           ruleId: "dates",
           key: "early-pay-arbitrage",
           classification: "REVIEW_NEEDED",
-          severity: savings.gte(50) ? "medium" : "low",
+          severity: savings.gte(scaled(50, inv.currency)) ? "medium" : "low",
           title: `Early-payment arbitrage: save ${m(str2(savings))} (${impliedApr.toFixed(1)}% implied APR)`,
           explanation: `This invoice offers a ${discountPct}% early-payment discount (betalingskorting / Skonto) if settled within ${discountDays} day(s) instead of ${effectiveNetDays} days. Paying ${windowSpread} day(s) early captures ${m(str2(savings))}—an annualized risk-free return of ${impliedApr.toFixed(1)}% APR.`,
           expected: `Pay within ${discountDays} days to save ${m(str2(savings))}`,

@@ -1,4 +1,5 @@
 import type { AuditFinding, Invoice } from "../../types";
+import { scaled } from "../currency-scale";
 
 function lineTokenSet(inv: Invoice): Set<string> {
   const words = inv.lineItems
@@ -137,8 +138,9 @@ export const duplicateInvoiceRule: Rule = (inv, ctx) => {
 
       if (gap <= 2 && D(o.total).gt(0)) {
         const combined = D(inv.total).plus(D(o.total));
-        const crossed500 = D(inv.total).lt(500) && D(o.total).lt(500) && combined.gte(500);
-        const crossed1000 = D(inv.total).lt(1000) && D(o.total).lt(1000) && combined.gte(1000);
+        const L500 = scaled(500, inv.currency), L1000 = scaled(1000, inv.currency); // approval-limit style thresholds, sized for the invoice currency
+        const crossed500 = D(inv.total).lt(L500) && D(o.total).lt(L500) && combined.gte(L500);
+        const crossed1000 = D(inv.total).lt(L1000) && D(o.total).lt(L1000) && combined.gte(L1000);
         if (crossed500 || crossed1000) {
           const threshold = crossed1000 ? 1000 : 500;
           out.push(makeFinding(inv, {

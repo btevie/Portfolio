@@ -1,4 +1,5 @@
 import type { AuditFinding, Invoice } from "../types";
+import { scaled } from "./currency-scale";
 import { netOf, priorInvoices } from "./history";
 import { D, formatMoney, str2 } from "./money";
 import { parseISO } from "./normalize";
@@ -80,14 +81,14 @@ export function forecastAnomalyFindings(inv: Invoice, ctx: AuditContext): AuditF
   const projected = D(fc.projectedNext);
   const m = (v: string) => formatMoney(v, inv.currency);
 
-  if (currNet.gt(upper95) && currNet.minus(projected).gte(10)) {
+  if (currNet.gt(upper95) && currNet.minus(projected).gte(scaled(10, inv.currency))) {
     const excess = currNet.minus(projected);
     return [
       makeFinding(inv, {
         ruleId: "price_history",
         key: "ols-ci95-breach",
         classification: "REVIEW_NEEDED",
-        severity: currNet.minus(upper95).gte(50) ? "medium" : "low",
+        severity: currNet.minus(upper95).gte(scaled(50, inv.currency)) ? "medium" : "low",
         title: `Above 95% econometric forecast envelope (${m(str2(currNet))} vs ${m(fc.projectedNext)} expected)`,
         explanation: `Based on a least-squares regression across ${fc.sampleSize} prior bills, ${inv.vendorName}'s expected charge was ${m(fc.projectedNext)} (95% range: ${m(fc.ci95Low)}–${m(fc.ci95High)}). This invoice breaks above the upper confidence bound.`,
         expected: `${m(fc.projectedNext)} (95% CI: ${m(fc.ci95Low)}–${m(fc.ci95High)})`,

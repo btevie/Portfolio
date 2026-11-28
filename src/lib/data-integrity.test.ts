@@ -165,3 +165,14 @@ describe("order independence", () => {
     expect(sig([...s.invoices].sort(() => r() - 0.5))).toEqual(sig(s.invoices));
   });
 });
+
+describe("amount thresholds follow the invoice currency", () => {
+  it("does not call a 20 yen tax difference serious, but does for 20 euro", async () => {
+    const { auditInvoice, configFromSettings } = await import("./audit/engine");
+    const s = createSeedState();
+    const mk = (currency: string, amount: string): Invoice => ({ id: "t1", vendorId: "v-x", vendorName: "Xco", number: "X-1", date: "2026-11-01", dueDate: "2026-11-15", currency, lineItems: [{ id: "l1", description: "Service", quantity: "1", unitPrice: amount, total: amount, kind: "item", taxRate: "10" }], subtotal: amount, discounts: "0.00", fees: "0.00", taxAmount: D(amount).times("0.10").plus(20).toFixed(2), total: D(amount).times("1.10").plus(20).toFixed(2), taxRate: "10", paymentStatus: "unpaid", source: "upload", extraction: "csv", createdAt: 1 });
+    const sev = (currency: string, amount: string) => auditInvoice(mk(currency, amount), { today: "2026-11-28", invoices: [], contractRates: [], config: configFromSettings(s.settings) }).findings.find((f) => f.ruleId === "tax" && f.id.endsWith(":amount"))?.severity;
+    expect(sev("EUR", "1000.00")).toBe("high");
+    expect(sev("JPY", "100000.00")).toBe("medium");
+  });
+});
