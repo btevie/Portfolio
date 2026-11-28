@@ -4,6 +4,7 @@ import { isCurrency, SYMBOLS } from "../currencies";
 import type { Currency } from "../types";
 import { cleanText } from "./sanitize";
 import { looseRead } from "./loose";
+import { splitLabelled } from "./split-labelled";
 import { looksMedical } from "../medical";
 import { MAX_DESC_CHARS, MAX_LINES, MAX_NUMBER_CHARS, MAX_VENDOR_CHARS, type ExtractedInvoice, type FieldKey } from "./types";
 
@@ -178,7 +179,9 @@ Total: 65.34`;
 export function parseText(text: string, defaultCurrency: Currency, method: "text" | "pdf" | "ocr" = "text"): ExtractedInvoice {
   const kv: Record<string, string> = {};
   const lines: Line[] = [];
-  for (const raw of text.split(/\r?\n/)) {
+  // Two labelled fields on one line ("Invoice date: 12/11/2026   Due date: 26/11/2026") are two fields, not one long date.
+  const split = text.split(/\r?\n/).flatMap((r) => (r.includes("|") ? [r] : splitLabelled(r)));
+  for (const raw of split) {
     const l = raw.trim();
     if (!l) continue;
     if (l.includes("|")) {

@@ -166,7 +166,7 @@ export function parseStatement(text: string, opts: { convention?: SignConvention
 
   const split = outI >= 0 && amountI < 0;
   const parsed = rows.slice(1).map((r, k) => ({ r, line: k + 2 }));
-  let convention: SignConvention | undefined = split ? "split-columns" : opts.convention;
+  const convention: SignConvention | undefined = split ? "split-columns" : opts.convention;
   let ambiguous = false;
   let suggested: SignConvention | undefined;
   if (!split && !convention) {

@@ -74,9 +74,9 @@ const money = (line: string): { text: string; value: string; hasDecimals: boolea
 };
 
 const SUBTOTAL = /\b(sub[\s-]?total|subtotaal|zwischensumme|net(?:to)?|excl\.?\s*(?:vat|btw|tax|mwst))\b/i;
-const DISCOUNT = /\b(discount|korting|rabatt|promo(?:tion)?|coupon|voucher)\b/i;
+const DISCOUNT = /\b(discount|korting|rabatt|promo(?:tion)?|coupon|voucher|insurance\s+(?:adjust\w*|paid|payment)|plan\s+(?:paid|discount)|contractual\s+adjust\w*|network\s+(?:discount|savings)|adjustments?)\b/i;
 const TAX = /\b(vat|btw|tax|mwst|ust|iva|gst|tva)\b/i;
-const TOTAL = /\b(grand\s+total|total\s+(?:due|amount|to\s+pay|payable|incl\.?\w*)|amount\s+(?:due|payable)|balance\s+due|totaal(?:\s+te\s+betalen)?|te\s+betalen|gesamt(?:betrag)?|summe|total|due)\b/i;
+const TOTAL = /\b(patient\s+(?:balance|responsibility|owes)|(?:amount|balance)\s+you\s+owe|you\s+owe|new\s+balance|statement\s+balance|pay\s+this\s+amount|grand\s+total|total\s+(?:due|amount|to\s+pay|payable|incl\.?\w*)|amount\s+(?:due|payable)|balance\s+due|totaal(?:\s+te\s+betalen)?|te\s+betalen|gesamt(?:betrag)?|summe|total|due)\b/i;
 const FEE = /\b(fee|fees|surcharge|admin|administration|late|delivery|shipping|postage|handling|service\s+charge|toeslag|kosten|gebühr|booking)\b/i;
 const NOISE = /(@|https?:|www\.|\biban\b|\bkvk\b|\bbtw[-\s]?nr|\bvat\s*(?:id|no|number|reg)|\btel\b|\bphone\b|\bfax\b|\bpage\s+\d|\bkvk\b|\bswift\b|\bbic\b)/i;
 const CHATTER = /^(?:hey|hi|hello|dear|thanks?|thank you|cheers|regards|fyi|here(?:'|’)?s|please|can you|could you)\b/i;
@@ -156,7 +156,7 @@ export function looseRead(text: string, preferred?: string): LooseRead {
       if (keyword === "sub") subtotal = v;
       else if (keyword === "disc") discounts = v;
       else if (keyword === "tax") taxAmount = v;
-      else totals.push({ value: v, prio: /grand|due|payable|te betalen|balance|amount/i.test(line) ? 2 : 1 });
+      else totals.push({ value: v, prio: /grand|due|payable|te betalen|balance|amount|patient|owe/i.test(line) ? 2 : 1 });
       continue;
     }
     if (keyword) continue;
@@ -165,7 +165,7 @@ export function looseRead(text: string, preferred?: string): LooseRead {
     // ---- a line item ----
     let desc = line;
     let qty: string | undefined;
-    const prefix = /^(\d+(?:[.,]\d+)?)\s*[x×]\s+/i.exec(desc) ?? /^(\d+)\s+(?=\p{L})/u.exec(desc);
+    const prefix = /^(\d+(?:[.,]\d+)?)\s*[x×]\s+/i.exec(desc) ?? (/^(?:\d{5}|[A-Z]\d{4})\b/.test(desc) ? null : /^(\d{1,3})\s+(?=\p{L})/u.exec(desc));
     if (prefix && looseAmount(prefix[1])) { qty = looseAmount(prefix[1])!; desc = desc.slice(prefix[0].length); }
     const suffixQty = /\s[x×]\s*(\d+(?:[.,]\d+)?)\b(?!\s*[.,]\d)/i.exec(desc);
     const found = money(desc);

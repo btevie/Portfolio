@@ -792,3 +792,57 @@ test("a credit note is matched to a bill, only counts once the user confirms it,
   await expect(page.getByText("Evidence: RF-2026-11")).toBeVisible(); // original still in the history
   await expect(page.getByText("Waiting: not confirmed applied or refunded").first()).toBeVisible();
 });
+
+test("a messy pasted bill is read, confirmed and checked instead of rejected", async ({ page }) => {
+  await page.goto("/invoices/new");
+  await page.getByRole("tab", { name: "Paste text" }).click();
+  await page.getByRole("button", { name: "A note to myself" }).click();
+  await page.getByRole("button", { name: "Check pasted invoice" }).click();
+  await expect(page.getByText("What Overbill read")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("backup addon")).toBeVisible();
+  await page.getByRole("checkbox", { name: /I checked/ }).check();
+  await page.getByRole("button", { name: "Confirm and run audit" }).click();
+  await expect(page.getByRole("link", { name: /See what we found|Open invoice/ })).toBeVisible({ timeout: 15_000 });
+});
+
+test("a medical bill is highlighted, always confirmed, and held out of the clear-to-pay list", async ({ page }) => {
+  await page.goto("/invoices/new");
+  await page.getByRole("tab", { name: "Paste text" }).click();
+  await page.locator("#paste").fill("City Hospital\nPatient: J Doe\nInvoice no: H-2291 date 03-11-2026\nConsultation 120,00\nX-ray 80,00\nTotal due 200,00");
+  await page.getByRole("button", { name: "Check pasted invoice" }).click();
+  await expect(page.getByText("This looks like a medical bill")).toBeVisible({ timeout: 15_000 });
+  await page.getByRole("checkbox", { name: /I checked/ }).check();
+  await page.getByRole("button", { name: "Confirm and run audit" }).click();
+  await page.getByRole("link", { name: /See what we found|Open invoice/ }).click();
+  await expect(page.getByText("Medical bill: take extra care")).toBeVisible();
+  await page.goto("/pay-run");
+  await expect(page.getByText(/Medical bill, wai/)).toBeVisible(); // held until its checks are done
+  await page.goto("/dashboard");
+  await expect(page.getByText(/unpaid medical bill/)).toBeVisible();
+});
+
+test("a bank statement without a header row can be pasted", async ({ page }) => {
+  await page.goto("/payments");
+  await page.getByText("Or paste rows from your bank").click();
+  await page.locator("#stmt-paste").fill("03/11/2026   NORTHWIND HOSTING   -166.98\n10/11/2026   NORTHWIND HOSTING   -166.98");
+  await page.getByRole("button", { name: "Check pasted rows" }).click();
+  // One Amount column never says which sign is money out, so Overbill asks (and suggests the likely answer).
+  await page.getByRole("button", { name: /Negative amounts are payments/ }).click();
+  await expect(page.getByRole("region", { name: "Results" })).toContainText("Checked 2 payments");
+});
+
+test("pasting shows what Overbill understood, live, and a starter example fills the box", async ({ page }) => {
+  await page.goto("/invoices/new?example=2");
+  await expect(page.locator("#paste")).toHaveValue(/ENERGIE NV/);
+  await expect(page.getByLabel("What Overbill understood")).toContainText("2026-8812");
+  await page.locator("#paste").fill("hello there");
+  await expect(page.getByText(/Not understood yet/)).toBeVisible();
+});
+
+test("the pay run shows what is due and when, and a vendor shows its scorecard", async ({ page }) => {
+  await page.goto("/pay-run");
+  await expect(page.getByTestId("cash-flow")).toContainText("What is due, and when");
+  await expect(page.getByTestId("cash-flow")).toContainText("Overdue");
+  await page.goto("/vendors/v-brightline");
+  await expect(page.getByLabel("Vendor scorecard")).toContainText("not confirmed errors");
+});

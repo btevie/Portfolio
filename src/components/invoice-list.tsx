@@ -185,11 +185,9 @@ export function InvoiceList() {
 
   return (
     <div className="mx-auto max-w-3xl lg:max-w-none">
-      <header className="mb-4 flex items-center justify-between gap-3 sm:mb-6">
+      <header className="mb-3 flex items-center justify-between gap-3 sm:mb-4">
         <div className="min-w-0">
-          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Invoices</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Search, filter and open any bill. Start with “Needs review”.</p>
-        </div>
+          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Invoices</h1>        </div>
       </header>
 
       {state.invoices.length === 0 ? (
@@ -197,49 +195,49 @@ export function InvoiceList() {
       ) : (
         <>
           {/* Summary: hero + swipeable stat cards (snap-scroll on phones, grid on desktop) */}
-          <section aria-label="Summary" className="mb-4 grid grid-cols-[1.35fr_1fr_1fr] gap-3">
+          <section aria-label="Summary" className="mb-3 grid grid-cols-[1.35fr_1fr_1fr] gap-2">
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} whileTap={{ scale: 0.97 }} transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }} className="min-w-0">
               <Link href="/recovery" aria-label={stake.top ? `Possible overcharges ${formatMoney(stake.top[1], stake.top[0])}. Open recovery tracker` : "No possible overcharges. Open recovery tracker"}
-                className={cn("relative block h-full overflow-hidden rounded-2xl px-3.5 py-3.5 outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-5 sm:py-5",
+                className={cn("relative block h-full overflow-hidden rounded-lg px-2.5 py-1.5 outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-3",
                   stake.tone === "bad" ? "bg-card text-warn ring-1 ring-line" : stake.tone === "warn" ? "bg-warn-bg text-warn ring-1 ring-warn-line" : "bg-primary text-primary-foreground")}>
-                <div className="relative flex items-start justify-between"><p className="text-xs opacity-90 sm:text-sm">{stake.top ? "Possible overcharges" : "Nothing flagged"}</p>
-                  <ArrowUpRight className="hidden size-4 opacity-70 sm:block" aria-hidden /></div>
+                <div className="relative flex items-start justify-between"><p className="text-[11px] opacity-90">{stake.top ? "Possible overcharges" : "Nothing flagged"}</p>
+                  <ArrowUpRight className="hidden size-3.5 opacity-70 sm:block" aria-hidden /></div>
                 {stake.top ? (
                   <>
-                    <p className="num relative mt-1 text-2xl font-semibold tracking-tight sm:mt-2 sm:text-3xl"><CountUp value={Number(stake.top[1])} format={(n) => formatMoney(n.toFixed(2), stake.top![0])} /></p>
+                    <p className="num relative text-sm font-semibold tracking-tight sm:text-base"><CountUp value={Number(stake.top[1])} format={(n) => formatMoney(n.toFixed(2), stake.top![0])} /></p>
                     {stake.others.length > 0 && <p className="relative mt-0.5 truncate text-[11px] opacity-80">+ {stake.others.join(" · ")}</p>}
                   </>
-                ) : <p className="relative mt-1 text-lg font-semibold sm:mt-2 sm:text-2xl">No possible overcharges</p>}
+                ) : <p className="relative text-sm font-semibold">No possible overcharges</p>}
               </Link>
             </motion.div>
             {([
               { label: "Needs review", value: counts.attention, hint: counts.overdue ? `${counts.overdue} past due` : "Open findings", tone: "text-warn" },
               { label: "Nothing flagged", value: counts.clear, hint: "Not a guarantee", tone: "text-ok" },
             ]).map((c, i) => (
-              <motion.div key={c.label} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1], delay: 0.06 * (i + 1) }} className={cn(card, "flex min-w-0 flex-col justify-between rounded-2xl px-3.5 py-3.5 sm:px-5 sm:py-5")}>
-                <p className="text-xs leading-tight text-muted-foreground sm:text-sm">{c.label}</p>
-                <div className="flex items-baseline gap-2"><p className="num mt-1 text-xl font-semibold tracking-tight sm:mt-2 sm:text-3xl"><CountUp value={c.value} /></p><p className={cn("hidden truncate text-xs font-medium sm:block", c.tone)}>{c.hint}</p></div>
+              <motion.div key={c.label} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1], delay: 0.06 * (i + 1) }} className={cn(card, "flex min-w-0 flex-col justify-between rounded-lg px-2.5 py-1.5 sm:px-3")}>
+                <p className="text-[11px] leading-tight text-muted-foreground">{c.label}</p>
+                <div className="flex items-baseline gap-2"><p className="num text-sm font-semibold tracking-tight sm:text-base"><CountUp value={c.value} /></p><p className={cn("hidden truncate text-[11px] font-medium sm:block", c.tone)}>{c.hint}</p></div>
               </motion.div>
             ))}
           </section>
 
-          <section aria-label="Invoice register" className={cn(card, "p-4 sm:p-6")}>
+          <section aria-label="Invoice register" className={cn(card, "p-3 sm:p-4")}>
             <h2 className="sr-only">Invoice register</h2>
             <div className="flex items-center gap-2">
               <div className="relative min-w-0 flex-1">
                 <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-                <input aria-label="Search invoices" type="search" enterKeyHint="search" placeholder="Search invoices" value={q} onChange={(event) => setQ(event.target.value)} className="h-10 w-full min-w-0 rounded-full bg-muted pr-10 pl-10 text-sm outline-none transition-shadow placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-search-cancel-button]:hidden" />
+                <input aria-label="Search invoices" type="search" enterKeyHint="search" placeholder="Search invoices" value={q} onChange={(event) => setQ(event.target.value)} className="h-9 w-full min-w-0 rounded-full bg-muted pr-10 pl-10 text-sm outline-none transition-shadow placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-search-cancel-button]:hidden" />
                 {q && <button type="button" onClick={() => setQ("")} aria-label="Clear search" className="absolute top-1/2 right-0.5 grid size-9 -translate-y-1/2 place-items-center rounded-full text-muted-foreground active:scale-90"><X className="size-4" aria-hidden /></button>}
               </div>
               <SortMenu value={sort} onChange={(v) => set("sort", v)} />
             </div>
 
-            <div role="group" aria-label="Filter invoices by status" className={"mt-3 flex flex-wrap gap-2"}>
+            <div role="group" aria-label="Filter invoices by status" className={"mt-2 flex flex-wrap gap-1.5"}>
               {FILTERS.filter((f) => f.value !== "credits" || counts.credits > 0).map((f) => {
                 const active = status === f.value;
                 return (
                   <motion.button key={f.value} type="button" aria-pressed={active} whileTap={{ scale: 0.94 }} onClick={() => set("status", f.value)}
-                    className={cn("relative inline-flex h-10 min-w-0 flex-1 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-3 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring", active ? "text-primary-foreground" : "bg-muted text-foreground")}>
+                    className={cn("relative inline-flex h-8 min-w-0 flex-1 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-2.5 text-xs font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring", active ? "text-primary-foreground" : "bg-muted text-foreground")}>
                     {active && <motion.span layoutId="inv-chip" className="absolute inset-0 rounded-full bg-primary" transition={{ type: "spring", stiffness: 500, damping: 38 }} />}
                     <span className="relative">{f.label}</span><span className="num relative text-xs">{counts[f.value]}</span>
                   </motion.button>
@@ -249,12 +247,12 @@ export function InvoiceList() {
 
             <div className="mt-2 grid grid-cols-2 gap-2">
               <label className="min-w-0"><span className="sr-only">Filter by vendor</span>
-                <select value={vendorFilter} onChange={(e) => set("vendor", e.target.value)} className="h-10 w-full min-w-0 cursor-pointer rounded-full bg-muted px-3.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <select value={vendorFilter} onChange={(e) => set("vendor", e.target.value)} className="h-9 text-xs w-full min-w-0 cursor-pointer rounded-full bg-muted px-3.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
                   <option value="">All vendors</option>
                   {[...state.vendors].sort((a, b) => a.name.localeCompare(b.name)).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
                 </select></label>
               <label className="min-w-0"><span className="sr-only">Filter by payment status{status === "credits" ? " (not available for credit notes, which are not payable)" : ""}</span>
-                <select value={payFilter} disabled={status === "credits"} title={status === "credits" ? "Credit notes are not payable, so payment status does not apply" : undefined} onChange={(e) => set("pay", e.target.value)} className="h-10 disabled:cursor-not-allowed disabled:opacity-50 w-full min-w-0 cursor-pointer rounded-full bg-muted px-3.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <select value={payFilter} disabled={status === "credits"} title={status === "credits" ? "Credit notes are not payable, so payment status does not apply" : undefined} onChange={(e) => set("pay", e.target.value)} className="h-9 text-xs disabled:cursor-not-allowed disabled:opacity-50 w-full min-w-0 cursor-pointer rounded-full bg-muted px-3.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
                   <option value="">Any payment status</option><option value="unpaid">Unpaid</option><option value="overdue">Past due</option><option value="paid">Paid (set by you)</option>
                 </select></label>
             </div>

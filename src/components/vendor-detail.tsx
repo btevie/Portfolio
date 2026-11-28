@@ -1,5 +1,6 @@
 "use client";
 import { parseContractText } from "@/lib/audit/contract-parser";
+import { VendorScorecard } from "@/components/vendor-extras";
 import { buildNegotiationPlaybook } from "@/lib/negotiation-intel";
 import { SelectMenu } from "@/components/ui/select-menu";
 import Link from "next/link";
@@ -56,6 +57,8 @@ export function VendorDetail({ id }: { id: string }) {
     <>
       <p className="mb-1 text-sm"><Link href="/vendors" className="-ml-2 inline-flex min-h-11 items-center rounded-md px-2 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">← Vendors</Link></p>
       <PageHeader title={vendor.name} description={`${vendor.category} · ${vendor.billing === "variable" ? "Usage-based billing, wider tolerances apply" : "Fixed recurring billing"}`} actions={<Pill tone={statusTone(s.status)}>{s.status}</Pill>} />
+
+      <VendorScorecard vendor={vendor} />
 
       <section aria-label="Vendor figures" className="mb-5 grid grid-cols-2 divide-x divide-line overflow-hidden rounded-2xl bg-card ring-1 ring-line lg:grid-cols-4">
         {[["Invoices", String(s.invoiceCount)], ["Average charge", s.average ? m(s.average.toFixed(2)) : "—"], ["Latest charge", s.latest ? m(s.latest.total) : "—"], ["Change", s.changePct === null ? "—" : `${s.changePct > 0 ? "+" : ""}${s.changePct}%`]].map(([k, v]) => (

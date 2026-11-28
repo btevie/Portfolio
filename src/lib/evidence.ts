@@ -165,6 +165,7 @@ export function findingGuide(f: AuditFinding, inv: Invoice): FindingGuide {
   const readingNotes: string[] = [];
   if (!info.fromYourDocument && info.kind === "simulated") readingNotes.push(info.detail);
   else if (info.kind !== "sample") readingNotes.push(info.detail);
+  if (/:nl-(bik|wki)/.test(f.id)) readingNotes.push("This compares the bill with Dutch collection-fee rules as Overbill understands them. It is not legal advice and the rules have exceptions: check with a consumer advice service before you dispute or refuse to pay.");
   for (const n of inv.readNotes ?? []) readingNotes.push(n);
   const unc = uncertainFieldLabels(inv);
   if (unc.length) readingNotes.push(`Overbill was unsure about the ${unc.join(", ")} and you confirmed ${unc.length === 1 ? "it" : "them"} before the check ran. If you confirmed from memory, re-check.`);

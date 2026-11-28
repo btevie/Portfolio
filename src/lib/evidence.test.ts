@@ -81,3 +81,11 @@ describe("simulated invoices never count toward real totals", () => {
     expect(D(0).eq(0)).toBe(true);
   });
 });
+
+describe("legal caveat", () => {
+  it("adds a not-legal-advice note to Dutch collection-fee findings only", () => {
+    const f = auditInvoice(base, ctx([base])).findings[0];
+    expect(findingGuide({ ...f, id: `${base.id}:unexpected_fee:nl-bik-staffel-cap` }, base).readingNotes.join(" ")).toMatch(/not legal advice/);
+    expect(findingGuide(f, base).readingNotes.join(" ")).not.toMatch(/legal advice/);
+  });
+});

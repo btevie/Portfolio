@@ -6,6 +6,7 @@
 
 import { isCurrency } from "../currencies";
 import { D, sum } from "../audit/money";
+import { splitLabelled } from "./split-labelled";
 
 const MONEY =/^[-(]?[€$£¥]?\d[\d.,]*\)?$/;
 const KEYWORD = /^(sub\s*-?\s*total|total(?:\s+due)?|amount\s+due|balance\s+due|grand\s+total|tax|vat|gst|discount|shipping|payment|invoice|date|due|currency|bill\s+to|ship\s+to|page)\b/i;
@@ -51,7 +52,7 @@ const LABELS: [RegExp, string][] = [
 ];
 
 export function pdfLinesToText(rawLines: string[]): string {
-  const lines = rawLines.map(clean).filter(Boolean);
+  const lines = rawLines.flatMap((r) => splitLabelled(r)).map(clean).filter(Boolean);
   const out: string[] = [];
   const seen = new Set<string>();
   const taxRates: string[] = [], taxAmounts: string[] = [];

@@ -1,5 +1,9 @@
 "use client";
 import { celebrate } from "@/lib/celebrate";
+import { useSearchParams } from "next/navigation";
+import { PastePreview } from "@/components/paste-preview";
+import { splitBills } from "@/lib/extraction/split";
+import { applyVendorMemory } from "@/lib/extraction/vendor-memory";
 import Link from "next/link";
 import { useCallback, useState, useEffect } from "react";
 import { AnimatePresence, motion } from "framer-motion";
@@ -54,9 +58,13 @@ function Icon({ name, type }: { name: string; type?: string }) {
 export function UploadFlow() {
   const state = useAppState();
   const [jobs, setJobs] = useState<Job[]>([]);
-  const [tab, setTab] = useState<"files" | "text">("files");
-  const [text, setText] = useState("");
+  // Links like /invoices/new?example=1 open the paste box with one of the messy examples filled in.
+  const exampleParam = useSearchParams().get("example"); // null when absent: Number(null) would wrongly be 0
+  const example = exampleParam === null ? undefined : MESSY_EXAMPLES[Number(exampleParam)];
+  const [tab, setTab] = useState<"files" | "text">(example ? "text" : "files");
+  const [text, setText] = useState(example?.text ?? "");
   const [pasted, setPasted] = useState(false);
+
   // Paste anywhere on the page: copy the bill (an email, a receipt, a note) and press Ctrl/Cmd+V. It lands in the paste box, ready to check.
   useEffect(() => {
     const onPaste = (ev: ClipboardEvent) => {
@@ -104,7 +112,21 @@ export function UploadFlow() {
         }
         const fileData = job.file && /\.(pdf|eml|png|jpe?g|webp)$/i.test(job.name) ? await job.file.arrayBuffer() : undefined;
         for (const s of STAGES.slice(0, 2)) { patch(job.id, { progress: s.at, stage: s.label }); await sleep(350); }
-        extracted = await extractInvoice(job.text !== undefined ? { kind: "text", text: job.text } : { kind: "file", name: job.name, type: job.type ?? "", size: job.size ?? 0, text: fileText, data: fileData }, { defaultCurrency: state.settings.currency });
+        const rawAiPayload = job.text ?? fileText;
+        if (rawAiPayload) {
+          try {
+            const aiRes = await fetch("/api/ai-audit", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ content: rawAiPayload, fileType: job.text !== undefined ? "text" : "csv" }),
+            });
+            if (aiRes.ok) extracted = await aiRes.json();
+          } catch {}
+        }
+        if (!extracted) {
+          extracted = await extractInvoice(job.text !== undefined ? { kind: "text", text: job.text } : { kind: "file", name: job.name, type: job.type ?? "", size: job.size ?? 0, text: fileText, data: fileData }, { defaultCurrency: state.settings.currency });
+        }
+        extracted = applyVendorMemory(extracted, getSnapshotState());
         // A medical bill is always confirmed by the person first: a misread figure here costs the most.
         if (extracted.medical) extracted = { ...extracted, lowConfidence: [...new Set([...extracted.lowConfidence, "vendorName", "date", "total"])] as ExtractedInvoice["lowConfidence"] };
         if (extracted.lowConfidence.length) { patch(job.id, { state: "review", progress: 45, stage: "Needs your confirmation", extracted, file: undefined }); return; }
@@ -128,11 +150,13 @@ export function UploadFlow() {
     const t = text.trim();
     if (!t) return;
     if (t.length > MAX_TEXT_CHARS) { setNotice(`Pasted text is longer than ${MAX_TEXT_CHARS.toLocaleString()} characters.`); return; }
-    const job: Job = { id: newId(), name: "Pasted invoice text", text: t, state: "ready", progress: 0, stage: "" };
-    setJobs((js) => [...js, job]);
+    // One paste may hold several bills (divider lines, or "Vendor:" repeated): check each as its own invoice.
+    const bills = splitBills(t);
+    const made: Job[] = bills.map((b, n) => ({ id: newId(), name: bills.length > 1 ? `Pasted bill ${n + 1} of ${bills.length}` : "Pasted invoice text", text: b, state: "ready", progress: 0, stage: "" }));
+    setJobs((js) => [...js, ...made]);
     setText("");
     setBusy(true);
-    process(job).finally(() => setBusy(false));
+    (async () => { for (const j of made) await process(j); })().finally(() => setBusy(false));
   }
 
   const ready = jobs.filter((j) => j.state === "ready");
@@ -174,6 +198,7 @@ export function UploadFlow() {
               <label htmlFor="paste" className="mb-1 block text-sm font-medium">Paste invoice text{pasted && <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-xs font-normal">Pasted from clipboard</span>}</label>
               <p className="mb-2 text-xs text-muted-foreground">Paste whatever you have: an email, a receipt, a note, a bill in another language. Overbill finds the amounts, dates and totals and shows you what it understood before checking anything.</p>
               <Textarea id="paste" value={text} onChange={(e) => setText(e.target.value)} rows={11} placeholder={"Paste anything, for example:\n\nNorthwind Hosting, invoice 2026-0047\nServer 166.98\nBackup add-on 9.99\nTotal 176.97"} className="font-mono text-sm leading-relaxed" />
+              <PastePreview text={text} />
               <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground"><span>Try a messy one:</span>{MESSY_EXAMPLES.map((x) => <button key={x.label} type="button" onClick={() => setText(x.text)} className="inline-flex min-h-9 cursor-pointer items-center rounded-full bg-muted px-3 font-medium text-foreground hover:bg-accent">{x.label}</button>)}</div>
               <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                 <button type="button" onClick={downloadCsvTemplate} className="mr-4 cursor-pointer text-sm font-medium text-primary hover:underline">Download CSV template</button><button type="button" onClick={() => setText(SAMPLE_TEXT)} className="cursor-pointer text-sm font-medium text-primary hover:underline">Insert a sample invoice</button>

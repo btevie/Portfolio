@@ -3,6 +3,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
 import { Celebration } from "@/components/celebration";
+import { UndoToast } from "@/components/undo-toast";
+import { CommandPalette } from "@/components/command-palette";
 import { haptic } from "@/lib/celebrate";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { TopBar } from "@/components/top-bar";
@@ -150,6 +152,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </main>
 
           <Celebration />
+          <UndoToast />
+          <CommandPalette />
           <nav aria-label="Main" data-typing={typing} className="fixed inset-x-4 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-40 flex items-center justify-between rounded-full transition-transform duration-200 data-[typing=true]:translate-y-[200%] bg-card/95 p-1.5 shadow-[0_12px_32px_-8px_rgb(0_0_0/0.35)] ring-1 ring-border backdrop-blur lg:hidden">
             {[NAV[0], NAV[1], { href: "/invoices/new", label: "Check", icon: Upload }, NAV[4], NAV[3]].map((n) => {
               const active = n.href === "/invoices/new" ? path === n.href : n.href === "/invoices" ? path.startsWith("/invoices") && path !== "/invoices/new" : path.startsWith(n.href);

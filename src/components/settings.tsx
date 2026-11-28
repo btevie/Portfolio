@@ -12,6 +12,7 @@ import { EncryptedBackup } from "@/components/encrypted-backup";
 
 const CURRENCY_OPTIONS = CURRENCIES.map((c) => ({ value: c, label: `${currencyName(c)} (${c})` }));
 import { Avatar } from "@/components/avatar";
+import { localAiStatus, setLocalAi, useLocalAi } from "@/lib/extraction/local-ai";
 import { forgetLocalFlags } from "@/lib/get-started";
 import { ProfilePictureDialog } from "@/components/profile-picture-dialog";
 import { Button, Card, Disclosure, Field, fieldClass, Modal, PageHeader, PillTabs, Toggle } from "@/components/ui";
@@ -32,6 +33,21 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
       <h2 className="text-sm font-semibold tracking-tight">{title}</h2>
       {children}
     </section>
+  );
+}
+
+function LocalAiSection() {
+  const on = useLocalAi();
+  const [status, setStatus] = useState("");
+  const change = async (v: boolean) => { setLocalAi(v); setStatus(v ? "Checking…" : ""); if (v) setStatus((await localAiStatus()).message); };
+  return (
+    <Section title="Local AI reader (optional)">
+      <Card className="px-5">
+        <Toggle id="local-ai" checked={on} onChange={change} label="Use a local AI model when a bill can't be read"
+          description="Off by default. Uses Ollama running on this computer, so nothing leaves it. Medical documents are never sent to the AI reader." />
+        {on && <p role="status" className="border-t border-line py-3 text-sm text-muted-foreground">{status || "On. Needs Ollama with llama3.2 (ollama pull llama3.2). Only works when Overbill is opened on this computer."}</p>}
+      </Card>
+    </Section>
   );
 }
 
@@ -113,6 +129,18 @@ export function SettingsView() {
                               <div className="px-3 pb-3"><Disclosure title="Advanced: turn individual checks on or off" subtitle="Turning a check off means it will never flag anything"><div className="divide-y divide-line px-5">{RULE_META.map((r) => <Toggle key={r.id} id={`rule-${r.id}`} label={r.name} description={r.description} checked={!st.disabledRules.includes(r.id)} onChange={(on) => toggleRule(r.id, on)} />)}</div></Disclosure></div>
             </Card>
           </Section>
+          {st.exceptions.length > 0 && (
+            <Section title="Remembered as expected">
+              <Card className="divide-y divide-line px-5">
+                {st.exceptions.map((e) => (
+                  <div key={e.id} className="flex items-center justify-between gap-3 py-3 text-sm">
+                    <span className="min-w-0"><span className="font-medium">{s.vendors.find((v) => v.id === e.vendorId)?.name ?? "Vendor"}</span> · {e.ruleId === "price_history" ? "price changes" : "extra fees"}{e.reason && <span className="block truncate text-xs text-muted-foreground">{e.reason}</span>}</span>
+                    <Button size="sm" onClick={() => actions.removeVendorException(e.id)}>Flag again</Button>
+                  </div>
+                ))}
+              </Card>
+            </Section>
+          )}
             </>)}
             {tab === "reminders" && (<>
             <Section title="Reminders">
@@ -125,6 +153,7 @@ export function SettingsView() {
           </Section>
             </>)}
             {tab === "privacy" && (<>
+            <LocalAiSection />
             <Section title="Privacy">
             <Card className="divide-y divide-line px-5">
               <ul className="list-disc space-y-1.5 py-3 pl-5 text-sm text-muted-foreground"><li>Files are never uploaded or saved. Only the extracted fields are kept.</li><li>Those fields are stored <strong className="text-foreground">unencrypted</strong> in this browser.</li><li>Overbill never contacts vendors or banks.</li><li>There is no analytics or tracking of any kind, so there is nothing to switch off.</li></ul>

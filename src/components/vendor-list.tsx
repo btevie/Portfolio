@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { DuplicateVendors } from "@/components/vendor-extras";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo } from "react";
 import { ArrowDownRight, ArrowRight, ArrowUpRight, LayoutGrid, Rows3, Search, Store } from "lucide-react";
@@ -54,6 +55,7 @@ export function VendorList() {
           );
         })}
       </div>
+      <DuplicateVendors />
       <Card className="max-sm:rounded-none max-sm:border-0 max-sm:bg-transparent max-sm:shadow-none max-sm:ring-0">
         <div className="grid grid-cols-2 gap-3 border-b border-line bg-canvas/50 p-4 max-sm:border-0 max-sm:bg-transparent max-sm:px-0 max-sm:pt-1 sm:flex sm:flex-wrap">
           <div className="relative col-span-2 min-w-52 flex-1">

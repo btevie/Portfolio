@@ -59,7 +59,7 @@ export function InvoiceDetail({ id }: { id: string }) {
       />
 
       {!inv.isCredit && inv.medical && <MedicalNotice inv={inv} />}
-      {!inv.isCredit && inv.medical && !isSimulated(inv) && <MedicalTracker inv={inv} />}
+      {!inv.isCredit && inv.medical && !isSimulated(inv) && <Disclosure className="mb-3" title="Your medical checks" subtitle="Itemised bill, insurer's statement, dates to remember"><MedicalTracker inv={inv} /></Disclosure>}
       {!inv.isCredit && <SourceNotice inv={inv} />}
       {!inv.isCredit && !inv.medical && !isSimulated(inv) && <p className="-mt-2 mb-4 text-xs text-muted-foreground">Is this a medical bill? <button type="button" onClick={() => actions.setMedical(inv.id, true)} className="min-h-9 cursor-pointer font-medium text-foreground underline underline-offset-2">Mark it as medical</button> for extra checks.</p>}
       {inv.isCredit && <div role="status" className="mb-4 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-primary"><strong>Credit note.</strong> This records money owed to you. It is not a bill to pay and is not audited as an invoice.</div>}
@@ -237,27 +237,33 @@ function FindingCard({ f, inv, onNote, first, simulated }: { f: AuditFinding; in
   const panel = `finding-${f.id.replace(/[^a-z0-9]/gi, "-")}`;
 
   return (
-    <Card className={cn("overflow-hidden rounded-[28px]", dismissed && "opacity-70")}>
-      <div className="p-4">
+    <Card className={cn("overflow-hidden rounded-xl", dismissed && "opacity-70")}>
+      <div className="p-3 sm:p-4">
         <div className="mb-2 flex flex-wrap items-center gap-2">
           {simulated && <Pill tone="bad">Simulated, not your bill</Pill>}<ClassBadge value={f.classification} size="sm" /><SeverityPill value={f.severity} />
           {decision === "confirmed" ? <Pill tone="bad">Confirmed error</Pill> : decision === "dismissed" ? <Pill>Dismissed</Pill> : null}
         </div>
-        <div className="flex items-start justify-between gap-3"><div><h3 className="display text-base font-semibold text-ink">{f.title}</h3><p className="mt-1 text-xs text-muted-foreground">Difference: <span className="font-semibold text-warn">{f.difference}</span></p></div><span className="num shrink-0 text-sm font-semibold text-ink">{D(f.amountAtRisk).gt(0) ? formatMoney(f.amountAtRisk, inv.currency) : ""}</span></div>
+        <div className="flex items-start justify-between gap-3"><div><h3 className="display text-sm font-semibold text-ink sm:text-base">{f.title}</h3><p className="mt-1 text-xs text-muted-foreground">Difference: <span className="font-semibold text-warn">{f.difference}</span></p></div><span className="num shrink-0 text-sm font-semibold text-ink">{D(f.amountAtRisk).gt(0) ? formatMoney(f.amountAtRisk, inv.currency) : ""}</span></div>
         {expanded && <div className="mt-3 space-y-3"><p className="text-sm text-muted-foreground">{f.explanation}</p></div>}
         <button type="button" aria-expanded={expanded} aria-controls={panel} onClick={() => setExpanded(!expanded)} className="mt-2 inline-flex min-h-8 cursor-pointer items-center gap-1 text-sm font-semibold text-primary hover:underline">
           {expanded ? "Hide details" : "View details"}<ChevronDown className={cn("size-4 transition-transform duration-150", expanded && "rotate-180")} aria-hidden />
         </button>
       </div>
       <AnimatePresence initial={false}>{expanded && (
-        <Reveal><div id={panel} className="space-y-4 border-t border-line bg-canvas/70 px-5 py-4 text-sm">
+        <Reveal><div id={panel} className="space-y-3 border-t border-line bg-canvas/70 px-3 py-3 text-xs sm:space-y-4 sm:px-5 sm:py-4 sm:text-sm">
           <EvidenceBlock guide={guide} simulated={simulated} />
-          <div><h4 className="eyebrow">Why we flagged this</h4><ul className="mt-1.5 list-disc space-y-1 pl-5">{f.evidence.map((e, i) => <li key={i}>{e}</li>)}</ul></div>
-          <div><h4 className="eyebrow">How sure are we? (confidence)</h4><p className="mt-1.5">{f.confidenceReason}</p></div>
-          <div><h4 className="eyebrow">What we can&apos;t be sure about</h4><p className="mt-1.5">{f.uncertainty}</p></div>
+          <details className="rounded-lg bg-card ring-1 ring-line [&_h4]:mt-2">
+            <summary className="min-h-10 cursor-pointer list-none px-3 py-2.5 font-medium">More detail: reading, evidence, confidence</summary>
+            <div className="space-y-2 px-3 pb-3">
+              {guide.readingNotes.length > 0 && <div><h4 className="eyebrow">How reliable the reading is</h4><ul className="mt-1 list-disc space-y-1 pl-5">{guide.readingNotes.map((n, i) => <li key={i}>{n}</li>)}</ul></div>}
+              <div><h4 className="eyebrow">Why we flagged this</h4><ul className="mt-1 list-disc space-y-1 pl-5">{f.evidence.map((e, i) => <li key={i}>{e}</li>)}</ul></div>
+              <div><h4 className="eyebrow">How sure are we?</h4><p className="mt-1">{f.confidenceReason}</p></div>
+              <div><h4 className="eyebrow">What we can&apos;t be sure about</h4><p className="mt-1">{f.uncertainty}</p></div>
+            </div>
+          </details>
           <div>
             <h4 className="eyebrow">What to do next</h4>
-            <p className="mt-1.5">{f.recommendedAction}</p>
+            <p className="mt-1">{f.recommendedAction}</p>
             {!simulated && (
               <div className="mt-2.5 flex flex-wrap items-center gap-2">
                 <Button
@@ -289,7 +295,7 @@ function FindingCard({ f, inv, onNote, first, simulated }: { f: AuditFinding; in
               <div className="flex gap-2"><Button size="sm" variant="primary" onClick={() => decide("dismissed", "Dismissed", reason)}>Dismiss finding</Button><Button size="sm" onClick={() => setAsking(false)}>Cancel</Button></div>
             </div>
           )}
-          <div className="flex flex-wrap gap-2 border-t border-line pt-4 [&>*]:max-sm:min-h-11 [&>*]:max-sm:flex-1">
+          <div className="grid grid-cols-2 gap-2 border-t border-line pt-3 sm:flex sm:flex-wrap sm:pt-4 [&>*]:max-sm:min-h-11 [&>*]:max-sm:text-xs">
             {decision !== "confirmed" && <Button size="sm" onClick={() => decide("confirmed", "Marked as confirmed")}>I agree: confirm this is an error</Button>}
             {(f.ruleId === "price_history" || f.ruleId === "unexpected_fee") && !state.settings.exceptions.some((e) => e.vendorId === inv.vendorId && e.ruleId === f.ruleId) && <Button size="sm" onClick={() => { actions.addVendorException(inv.vendorId, f.ruleId as "price_history" | "unexpected_fee", `Expected from invoice ${inv.number}`); }}>Expected: don&apos;t flag this for {inv.vendorName}</Button>}
             {decision !== "dismissed" ? <Button size="sm" onClick={() => setAsking(true)} aria-expanded={asking}>Dismiss: this is expected</Button> : <Button size="sm" onClick={() => actions.setDecision(f.id, "open")}>Reopen</Button>}
@@ -310,7 +316,7 @@ function SourceNotice({ inv }: { inv: Invoice }) {
   const unc = uncertainFieldLabels(inv);
   if (info.kind === "simulated") {
     return (
-      <div role="alert" className="mb-6 flex items-start gap-3 rounded-lg border border-bad-line bg-bad-bg px-4 py-4 text-sm text-bad sm:px-5">
+      <div role="alert" className="mb-4 flex items-start gap-2.5 rounded-lg border border-bad-line bg-bad-bg px-3 py-3 text-xs text-bad sm:px-4 sm:text-sm">
         <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
         <div className="min-w-0 space-y-1.5">
           <p><strong>Simulated extraction: this is not your document.</strong></p>
@@ -322,48 +328,49 @@ function SourceNotice({ inv }: { inv: Invoice }) {
   }
   if (info.kind === "sample") return <p className="mb-4 text-xs text-muted-foreground">{info.label}. {info.detail}</p>;
   return (
-    <div className="mb-4 rounded-xl bg-card px-4 py-3 text-sm ring-1 ring-line">
-      <p className="font-medium">{info.label}</p>
-      <p className="mt-1 text-muted-foreground">{info.detail}</p>
+    <details className="mb-3 text-xs">
+      <summary className="min-h-9 cursor-pointer py-2 text-muted-foreground"><span className="font-medium text-foreground">{info.label}</span> · how reliable?</summary>
+      <p className="text-muted-foreground">{info.detail}</p>
       {unc.length > 0 && <p className="mt-1 text-muted-foreground">You confirmed the {unc.join(", ")} during review because Overbill was unsure.</p>}
-    </div>
+    </details>
   );
 }
 
 /** What was checked, the exact figures compared with where each came from, and what to verify on the paper bill. */
 function EvidenceBlock({ guide, simulated }: { guide: ReturnType<typeof findingGuide>; simulated?: boolean }) {
+  const shown = guide.verify.slice(0, 3), more = guide.verify.slice(3);
   return (
-    <div className="space-y-4">
-      <div><h4 className="eyebrow">What we checked</h4><p className="mt-1.5"><strong className="font-semibold">{guide.ruleName}.</strong> {guide.checked}</p></div>
-      <div>
-        <h4 className="eyebrow">Figures compared and where they came from</h4>
-        <ul className="mt-1.5 divide-y divide-line rounded-md border border-line bg-card">
-          {guide.compared.map((row) => (
-            <li key={row.label} className="grid gap-0.5 px-3 py-2 sm:grid-cols-[7rem_1fr] sm:gap-3">
-              <span className="text-xs font-medium text-muted-foreground">{row.label}</span>
-              <span className="min-w-0"><span className="num block break-words font-semibold">{row.value}</span><span className="block text-xs text-muted-foreground">{row.from}</span></span>
-            </li>
-          ))}
-        </ul>
-      </div>
-      {guide.readingNotes.length > 0 && <div><h4 className="eyebrow">How reliable the reading is</h4><ul className="mt-1.5 list-disc space-y-1 pl-5">{guide.readingNotes.map((n, i) => <li key={i}>{n}</li>)}</ul></div>}
+    <div className="space-y-3">
+      <p><strong className="font-semibold">{guide.ruleName}.</strong> <span className="text-muted-foreground">{guide.checked}</span></p>
+      <ul className="divide-y divide-line rounded-md border border-line bg-card" aria-label="Figures compared and where they came from">
+        {guide.compared.map((row) => (
+          <li key={row.label} className="grid gap-0.5 px-3 py-1.5 sm:grid-cols-[7rem_1fr] sm:gap-3">
+            <span className="text-[11px] font-medium text-muted-foreground sm:text-xs">{row.label}</span>
+            <span className="min-w-0"><span className="num block break-words font-semibold">{row.value}</span><span className="block text-[11px] text-muted-foreground sm:text-xs">{row.from}</span></span>
+          </li>
+        ))}
+      </ul>
       <div>
         <h4 className="eyebrow">{simulated ? "What to do" : "Verify on the original bill"}</h4>
-        <ol className="mt-1.5 list-decimal space-y-1 pl-5">{guide.verify.map((v, i) => <li key={i}>{v}</li>)}</ol>
+        <ol className="mt-1 list-decimal space-y-1 pl-5">{shown.map((v, i) => <li key={i}>{v}</li>)}</ol>
+        {more.length > 0 && <details className="mt-1"><summary className="min-h-9 cursor-pointer text-primary">{more.length} more to check</summary><ol start={4} className="mt-1 list-decimal space-y-1 pl-5">{more.map((v, i) => <li key={i}>{v}</li>)}</ol></details>}
       </div>
     </div>
   );
 }
 
-
-/** Medical bills are shown first and loudly: the cost of a mistake is highest here. */
+/** Medical bills are marked at the top, but the long checklist stays folded so the page isn't crowded. */
 function MedicalNotice({ inv }: { inv: Invoice }) {
   return (
-    <section aria-label="Medical bill" className="mb-5 rounded-2xl border-l-4 border-l-sky-600 bg-sky-600/10 p-4 ring-1 ring-sky-600/30 sm:p-5">
-      <h2 className="flex items-center gap-2 text-base font-semibold text-sky-800 dark:text-sky-200"><HeartPulse className="size-5 shrink-0" aria-hidden />{MEDICAL_TITLE}</h2>
-      <p className="mt-1.5 text-sm">{MEDICAL_INTRO}</p>
-      <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm">{MEDICAL_CHECKLIST.map((c, i) => <li key={i}>{c}</li>)}</ol>
-      <p className="mt-3 text-xs text-muted-foreground">Overbill compares figures; it can&apos;t tell whether a treatment or code is right. This bill is never counted as clear to pay automatically. <button type="button" onClick={() => actions.setMedical(inv.id, false)} className="min-h-9 cursor-pointer font-medium text-foreground underline underline-offset-2">Not a medical bill</button></p>
-    </section>
+    <details className="mb-3 rounded-xl border-l-4 border-l-sky-600 bg-sky-600/10 ring-1 ring-sky-600/30">
+      <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 px-3 py-2 text-sm font-semibold text-sky-800 dark:text-sky-200">
+        <HeartPulse className="size-4 shrink-0" aria-hidden /><span className="min-w-0 flex-1">{MEDICAL_TITLE}</span><span className="shrink-0 text-xs font-normal">Checklist</span>
+      </summary>
+      <div className="px-3 pb-3 text-xs sm:text-sm">
+        <p>{MEDICAL_INTRO}</p>
+        <ol className="mt-1.5 list-decimal space-y-1 pl-5">{MEDICAL_CHECKLIST.map((c, i) => <li key={i}>{c}</li>)}</ol>
+        <p className="mt-2 text-muted-foreground">Overbill compares figures; it can&apos;t tell whether a treatment or code is right. It is never counted as clear to pay automatically. <button type="button" onClick={() => actions.setMedical(inv.id, false)} className="min-h-9 cursor-pointer font-medium text-foreground underline underline-offset-2">Not a medical bill</button></p>
+      </div>
+    </details>
   );
 }

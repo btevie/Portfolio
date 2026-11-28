@@ -1,7 +1,7 @@
 "use client";
 import { ChevronLeft, ChevronRight, Search } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { UserMenu } from "@/components/user-menu";
 import { NotificationBell } from "@/components/notification-bell";
 
@@ -11,11 +11,6 @@ export function TopBar() {
   const box = useRef<HTMLInputElement>(null);
   const [q, setQ] = useState("");
 
-  useEffect(() => {
-    const k = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { if (!box.current || box.current.offsetParent === null) return; /* hidden on phones: leave the browser shortcut alone */ e.preventDefault(); box.current.focus(); } };
-    window.addEventListener("keydown", k);
-    return () => window.removeEventListener("keydown", k);
-  }, []);
 
   const nav = "grid size-9 cursor-pointer place-items-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground";
   return (
