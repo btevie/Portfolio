@@ -423,7 +423,7 @@ export function atStakeByCurrency(state: AppState, audits: Audits): { totals: Cu
     if (effectiveClassification(state, a) === "LIKELY_ERROR") tone = "bad"; else tone ??= "warn";
   }
   const pref = state.settings.currency;
-  const totals = [...map.values()].sort((a, b) => (a.currency === pref ? -1 : b.currency === pref ? 1 : Number(b.amount) - Number(a.amount)));
+  const totals = [...map.values()].sort((a, b) => (a.currency === pref ? -1 : b.currency === pref ? 1 : b.amount.comparedTo(a.amount)));
   return { totals, tone };
 }
 

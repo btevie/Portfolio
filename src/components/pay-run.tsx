@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useMemo } from "react";
 import { motion } from "framer-motion";
 import { CheckCircle2, Download, PauseCircle, Wallet } from "lucide-react";
-import { formatMoney } from "@/lib/audit/money";
+import { D, formatMoney } from "@/lib/audit/money";
 import { useAudited } from "@/lib/data/hooks";
 import { effectiveClassification, invoiceExposure, isOpen, today } from "@/lib/data/selectors";
 import { actions } from "@/lib/data/store";
@@ -20,8 +20,8 @@ import { Button, EmptyState, LinkButton } from "@/components/ui";
 
 /** Per-currency totals as text. Currencies are never added together. */
 function totals(list: Invoice[]): string {
-  const m = new Map<Currency, number>();
-  for (const i of list) m.set(i.currency, (m.get(i.currency) ?? 0) + Number(i.total));
+  const m = new Map<Currency, ReturnType<typeof D>>();
+  for (const i of list) m.set(i.currency, (m.get(i.currency) ?? D(0)).plus(D(i.total))); // exact decimal addition, never floating point
   return [...m.entries()].map(([c, n]) => formatMoney(n.toFixed(2), c)).join(" · ") || "—";
 }
 
